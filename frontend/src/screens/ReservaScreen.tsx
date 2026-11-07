@@ -25,7 +25,7 @@ import type {
   Service,
   Slot,
 } from '../services/api';
-import { addDays, todayDate } from '../utils/dates';
+import { addDays, todayDate, weekdayLong } from '../utils/dates';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Reserva'>;
 
@@ -428,6 +428,15 @@ export default function ReservaScreen({ navigation, route }: Props) {
         </>
       )}
 
+      {date && slot && (
+        <View style={styles.selectionBox}>
+          <Text style={styles.selectionLabel}>Reserva seleccionada</Text>
+          <Text style={styles.selectionMain}>
+            {service?.name} · {weekdayLong(date)} {date} · {slot.start}-{slot.end}
+          </Text>
+        </View>
+      )}
+
       {/* Franja seleccionada: dos blocs separats */}
       {slot && (
         <View style={styles.infoRow}>
@@ -557,7 +566,10 @@ const styles = StyleSheet.create({
   dismiss: { position: 'absolute', top: 8, right: 10, zIndex: 1 },
   dismissText: { fontSize: 18, color: '#6a1b9a' },
   modeRow: { flexDirection: 'row', gap: 8 },
-  infoRow: { flexDirection: 'row', gap: 8, marginTop: 16 },
+  selectionBox: { marginTop: 16, padding: 12, borderRadius: 10, backgroundColor: '#e3f0ff' },
+  selectionLabel: { fontSize: 12, color: '#555' },
+  selectionMain: { marginTop: 3, fontSize: 16, fontWeight: 'bold' },
+  infoRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
   infoBox: { flex: 1, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#ccc' },
   infoTitle: { fontSize: 12, color: '#666', marginBottom: 4 },
   infoMain: { fontSize: 15, fontWeight: 'bold' },
