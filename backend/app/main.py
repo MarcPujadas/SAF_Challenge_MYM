@@ -140,8 +140,6 @@ def build_slots(
     weekday: int
 ) -> list[tuple[int, int]]:
 
-    # Fitness utilitza els torns reals
-    # detectats al dataset del SAF.
     if space_type == "fitness":
 
         valid_slots = FITNESS_VALID_SLOTS.get(
@@ -157,8 +155,6 @@ def build_slots(
             for start in valid_slots
         ]
 
-    # Altres espais:
-    # MVP amb franges d'una hora.
     duration = 60
 
     starts = range(
@@ -171,6 +167,40 @@ def build_slots(
         (start, start + duration)
         for start in starts
     ]
+
+
+def validate_reservation_slot(
+    space_type: str,
+    reservation_date: date_type,
+    start: str,
+    end: str
+):
+    start_minutes = time_to_minutes(start)
+    end_minutes = time_to_minutes(end)
+
+    if end_minutes <= start_minutes:
+        raise ApiError(
+            "INVALID_TIME",
+            "Reservation end must be after start."
+        )
+
+    weekday = reservation_date.weekday()
+
+    valid_slots = build_slots(
+        space_type,
+        weekday
+    )
+
+    requested_slot = (
+        start_minutes,
+        end_minutes
+    )
+
+    if requested_slot not in valid_slots:
+        raise ApiError(
+            "INVALID_TIME",
+            "The requested time does not match a valid reservation slot."
+        )
 
 
 @asynccontextmanager
@@ -409,24 +439,17 @@ def availability(
             {
                 "start": start_string,
                 "end": end_string,
-
-                # Disponibilitat actual
-                # segons reserves de SAF Hack.
                 "available": (
                     remaining_capacity > 0
                 ),
-
                 "remaining_capacity": (
                     remaining_capacity
                 ),
-
-                # Ocupació històrica del SAF.
                 "occupancy_level": (
                     historical[
                         "occupancy_level"
                     ]
                 ),
-
                 "occupancy_score": (
                     historical[
                         "occupancy_score"
@@ -448,23 +471,9 @@ def availability(
 def create_reservation(
     payload: ReservationCreate
 ):
-    parse_date(
+    reservation_date = parse_date(
         payload.date
     )
-
-    start = time_to_minutes(
-        payload.start
-    )
-
-    end = time_to_minutes(
-        payload.end
-    )
-
-    if end <= start:
-        raise ApiError(
-            "INVALID_TIME",
-            "Reservation end must be after start."
-        )
 
     space = get_space(
         payload.space_id
@@ -475,6 +484,21 @@ def create_reservation(
             "INVALID_SPACE",
             "This space is not reservable."
         )
+
+    validate_reservation_slot(
+        space_type=space["type"],
+        reservation_date=reservation_date,
+        start=payload.start,
+        end=payload.end
+    )
+
+    start = time_to_minutes(
+        payload.start
+    )
+
+    end = time_to_minutes(
+        payload.end
+    )
 
     with get_connection() as connection:
 
