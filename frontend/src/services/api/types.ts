@@ -6,6 +6,9 @@ export type ApiErrorCode =
   | 'INVALID_SPACE'
   | 'INVALID_TIME'
   | 'RESERVATION_CONFLICT'
+  | 'INVALID_DATE'
+  | 'INVALID_DATE_RANGE'
+  | 'OCCUPANCY_DATA_UNAVAILABLE'
   | (string & {});
 
 export type ApiEnvelope<T> = {
@@ -59,6 +62,7 @@ export type RecommendationSlot = {
 };
 
 export type Recommendation = {
+  recommendation_id: string;
   requested_slot: RecommendationSlot;
   recommended_slot: RecommendationSlot | null; // null si no hi ha alternativa (regla 7)
   message: string;
@@ -68,6 +72,51 @@ export type Recommendation = {
     weekday: string;
     historical_period: string;
   };
+};
+
+// POST /recommendations/{recommendation_id}/action
+export type RecommendationActionType = 'accepted' | 'ignored';
+
+export type RecommendationAction = {
+  recommendation_id: string;
+  action: RecommendationActionType;
+};
+
+// GET /availability/heatmap?space_id=&from=&to=  (days pot ser [])
+export type HeatmapSlot = {
+  hour: string;
+  occupancy_score: number | null; // 0..100
+  occupancy_level: OccupancyLevel;
+};
+
+export type HeatmapDay = {
+  date: string;
+  slots: HeatmapSlot[];
+};
+
+export type Heatmap = {
+  space_id: string;
+  days: HeatmapDay[];
+};
+
+// GET /availability/week?space_id=&from=&to=
+// PROVISIONAL, pendent de contracts.md (estructura orientativa de tasques_v3.md 4.3).
+// Disponibilitat actual (reserves + capacitat). Sense occupancy_*: aixo es la previsio.
+export type WeekSlot = {
+  start: string;
+  end: string;
+  available: boolean;
+  remaining_capacity: number | null;
+};
+
+export type WeekDay = {
+  date: string;
+  slots: WeekSlot[];
+};
+
+export type AvailabilityWeek = {
+  space_id: string;
+  days: WeekDay[];
 };
 
 // POST /reservations
@@ -98,4 +147,28 @@ export type ReservationItem = {
   start: string;
   end: string;
   status: ReservationStatus;
+};
+
+// DELETE /reservations/{reservation_id}
+export type ReservationCancelled = {
+  reservation_id: string;
+  status: ReservationStatus;
+};
+
+// POST /safi/chat
+export type SafiChatRequest = {
+  user_id: string;
+  message: string;
+};
+
+export type SafiSource = {
+  type: string;
+  space_id: string;
+  date_reference: string;
+};
+
+export type SafiChatResponse = {
+  message: string;
+  sources: SafiSource[];
+  can_answer: boolean;
 };
