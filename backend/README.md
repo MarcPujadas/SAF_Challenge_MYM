@@ -303,10 +303,33 @@ La base conté:
 users
 spaces
 services
+service_spaces
 reservations
 ```
 
 La base de dades local està ignorada per Git.
+
+`services.space_id` es conserva com a recurs representatiu per compatibilitat
+amb l'API actual. `service_spaces` manté el mapping complet servei → recursos:
+capacitat de persones i unitats físiques es guarden per separat. El seed és
+idempotent i s'executa en inicialitzar la base de dades i després d'importar
+espais o serveis.
+
+El mapping central és a `app/config/service_spaces.py`. Inclou vuit carrils
+per a piscina de 25 m i quatre pistes de pàdel, tennis, esquaix i futbol quan
+correspon. Pàdel Pista 2 es conserva com a recurs virtual si manca a SQLite,
+perquè apareix al mapping de l'històric normalitzat; no es modifica el fitxer
+font ni s'inventa capacitat de persones.
+
+Per executar l'informe de qualitat del mapping des de `backend/`:
+
+```powershell
+python -m scripts.validate_service_spaces
+```
+
+L'informe identifica mappings incomplets/invàlids, recursos duplicats,
+recursos de base de dades o històric sense mapping i el cas especial de Pàdel
+Pista 2. No forma part de l'arrencada de l'API.
 
 ## Usuari de demostració
 

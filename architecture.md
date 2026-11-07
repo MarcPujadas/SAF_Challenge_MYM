@@ -111,6 +111,14 @@ S'utilitza per guardar les dades creades per l'aplicació:
 
 Les reserves de la demo són reserves reals dins del nostre sistema i queden persistides a SQLite.
 
+La relació actual `services.space_id` es manté com a espai representatiu per
+compatibilitat. La taula `service_spaces` permet preparar la relació d'un
+servei amb diversos recursos físics sense canviar encara els endpoints ni les
+respostes existents. El mapping és centralitzat a
+`backend/app/config/service_spaces.py`; la capacitat de persones no es confon
+amb la capacitat d'unitats reservables. Pàdel Pista 2 es pot marcar com a
+virtual quan falta a la taula `spaces`, sense modificar el dataset original.
+
 ### Dades i recomanador
 
 **Python + Pandas**

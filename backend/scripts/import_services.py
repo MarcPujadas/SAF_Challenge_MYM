@@ -2,6 +2,7 @@ from app.database.database import (
     get_connection,
     init_db,
 )
+from app.database.service_spaces import seed_service_spaces
 from app.config.services import services_for_database
 
 
@@ -65,6 +66,8 @@ def main():
                 f"{service['id']:20} "
                 f"-> {service['space_id']}"
             )
+
+        seed_service_spaces(connection)
 
 
 if __name__ == "__main__":

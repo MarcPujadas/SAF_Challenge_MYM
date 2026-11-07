@@ -3,6 +3,9 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from app.database.service_spaces import seed_service_spaces
+
+
 DB_PATH = Path(__file__).resolve().parent / "safhack.db"
 
 
@@ -40,6 +43,56 @@ def init_db() -> None:
                 reservable INTEGER NOT NULL DEFAULT 1,
                 FOREIGN KEY (space_id) REFERENCES spaces(id)
             );
+
+            CREATE TABLE IF NOT EXISTS service_spaces (
+                service_id TEXT NOT NULL,
+                space_id TEXT NOT NULL,
+                resource_label TEXT NOT NULL,
+                person_capacity INTEGER,
+                reservation_capacity INTEGER,
+                capacity_mode TEXT NOT NULL CHECK (
+                    capacity_mode IN ('people', 'resource_units')
+                ),
+                is_active INTEGER NOT NULL DEFAULT 1 CHECK (
+                    is_active IN (0, 1)
+                ),
+                is_virtual INTEGER NOT NULL DEFAULT 0 CHECK (
+                    is_virtual IN (0, 1)
+                ),
+                display_order INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (service_id, space_id),
+                FOREIGN KEY (service_id) REFERENCES services(id),
+                CHECK (person_capacity IS NULL OR person_capacity >= 0),
+                CHECK (
+                    reservation_capacity IS NULL
+                    OR reservation_capacity >= 0
+                )
+            );
+
+            CREATE TRIGGER IF NOT EXISTS
+            service_spaces_require_existing_physical_space_insert
+            BEFORE INSERT ON service_spaces
+            WHEN NEW.is_virtual = 0
+                AND NOT EXISTS (
+                    SELECT 1 FROM spaces WHERE id = NEW.space_id
+                )
+            BEGIN
+                SELECT RAISE(ABORT, 'Physical service space does not exist');
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS
+            service_spaces_require_existing_physical_space_update
+            BEFORE UPDATE OF space_id, is_virtual ON service_spaces
+            WHEN NEW.is_virtual = 0
+                AND NOT EXISTS (
+                    SELECT 1 FROM spaces WHERE id = NEW.space_id
+                )
+            BEGIN
+                SELECT RAISE(ABORT, 'Physical service space does not exist');
+            END;
+
+            CREATE INDEX IF NOT EXISTS idx_service_spaces_space_active
+            ON service_spaces(space_id, is_active);
 
             CREATE TABLE IF NOT EXISTS reservations (
                 id TEXT PRIMARY KEY,
@@ -103,8 +156,4 @@ def init_db() -> None:
             "INSERT OR IGNORE INTO users (id, name) VALUES (?, ?)",
             ("demo-user", "Usuari Demo"),
         )
-
-        
-
-        
-        
+        seed_service_spaces(connection)

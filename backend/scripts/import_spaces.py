@@ -8,6 +8,7 @@ from app.database.database import (
     get_connection,
     init_db,
 )
+from app.database.service_spaces import seed_service_spaces
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -239,6 +240,8 @@ def main():
                 f"{capacity:3} persones   "
                 f"{space_type}"
             )
+
+        seed_service_spaces(connection)
 
     print()
 
