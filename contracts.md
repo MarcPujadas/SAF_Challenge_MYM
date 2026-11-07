@@ -869,6 +869,141 @@ INVALID_DATE_RANGE
 
 ---
 
+## GET /admin/recommendations/stats
+
+Retorna estadístiques sobre les recomanacions generades per SAFi i les decisions dels usuaris.
+
+Permet mesurar l'impacte real de les recomanacions i fins a quin punt els usuaris les segueixen.
+
+### Query parameters opcionals
+
+```text
+space_id=sala-fitnes-sala-cardio
+from=2026-11-01
+to=2026-11-30
+```
+
+Es poden combinar els filtres.
+
+### Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "period": {
+      "from": "2026-11-01",
+      "to": "2026-11-30"
+    },
+    "space_id": "sala-fitnes-sala-cardio",
+    "total_recommendations": 120,
+    "accepted": 73,
+    "ignored": 31,
+    "without_action": 16,
+    "decision_rate": 86.7,
+    "acceptance_rate": 70.2,
+    "average_score_improvement": 24.3
+  },
+  "error": null
+}
+```
+
+### Significat de les mètriques
+
+`total_recommendations`
+
+Nombre total de recomanacions generades.
+
+`accepted`
+
+Recomanacions que l'usuari ha acceptat.
+
+`ignored`
+
+Recomanacions que l'usuari ha ignorat.
+
+`without_action`
+
+Recomanacions per a les quals encara no existeix una decisió registrada.
+
+`decision_rate`
+
+Percentatge de recomanacions que ja tenen una decisió:
+
+```text
+(accepted + ignored) / total_recommendations × 100
+```
+
+`acceptance_rate`
+
+Percentatge de recomanacions acceptades entre les recomanacions que ja tenen una decisió:
+
+```text
+accepted / (accepted + ignored) × 100
+```
+
+Les recomanacions sense acció no formen part d'aquest càlcul.
+
+`average_score_improvement`
+
+Reducció mitjana del `occupancy_score` entre la franja original i la franja recomanada.
+
+Exemple:
+
+```text
+franja original = 80
+franja recomanada = 40
+millora = 40 punts
+```
+
+Només es tenen en compte recomanacions on existeixen els dos scores.
+
+Si no hi ha recomanacions comparables:
+
+```json
+{
+  "average_score_improvement": null
+}
+```
+
+### Sense dades
+
+```json
+{
+  "success": true,
+  "data": {
+    "period": {
+      "from": null,
+      "to": null
+    },
+    "space_id": null,
+    "total_recommendations": 0,
+    "accepted": 0,
+    "ignored": 0,
+    "without_action": 0,
+    "decision_rate": 0.0,
+    "acceptance_rate": 0.0,
+    "average_score_improvement": null
+  },
+  "error": null
+}
+```
+
+### Errors possibles
+
+Data incorrecta:
+
+```text
+INVALID_DATE
+```
+
+Rang invertit:
+
+```text
+INVALID_DATE_RANGE
+```
+
+
 ## GET /admin/reservations
 
 Retorna les reserves actives creades dins de SAF Hack.
