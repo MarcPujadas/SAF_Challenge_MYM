@@ -66,10 +66,26 @@ def build_message(
             "amb menys ocupació."
         )
 
+    reduction = (
+        requested["occupancy_score"]
+        - alternative["occupancy_score"]
+    )
+    level_labels = {
+        "low": "baixa",
+        "medium": "mitjana",
+        "high": "alta",
+        "very_high": "molt alta",
+        "unknown": "desconeguda",
+    }
+
     return (
-        f"Les {alternative['start']} acostumen "
-        f"a tenir menys ocupació que les "
-        f"{requested['start_time']}."
+        f"SAFi et recomana les {alternative['start']}: "
+        f"ocupació habitual {level_labels[alternative['occupancy_level']]} "
+        f"({alternative['occupancy_score']}/100), davant de "
+        f"{level_labels[requested['occupancy_level']]} "
+        f"({requested['occupancy_score']}/100) a les "
+        f"{requested['start_time']}. "
+        f"Reducció estimada: {reduction} punts."
     )
 
 
