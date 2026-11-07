@@ -4,6 +4,9 @@ from app.common import ApiError
 from app.database.database import get_connection
 
 
+UNSUPPORTED_SAFI_RECOMMENDATION_TYPES = {"court"}
+
+
 def get_space(space_id: str):
     with closing(get_connection()) as connection:
         row = connection.execute(
@@ -22,6 +25,11 @@ def get_space(space_id: str):
             404,
         )
     return row
+
+
+def supports_safi_recommendations(space_id: str) -> bool:
+    space = get_space(space_id)
+    return space["type"] not in UNSUPPORTED_SAFI_RECOMMENDATION_TYPES
 
 
 def list_spaces() -> list[dict]:
