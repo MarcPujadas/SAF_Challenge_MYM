@@ -839,6 +839,32 @@ Endpoints disponibles:
 - `GET /api/v1/admin/reservations`
 - `GET /api/v1/admin/occupancy`
 
+`GET /api/v1/admin/stats` calcula `busiest_hour` i `quietest_hour` a partir
+dels scores de l'històric processat. Si no hi ha dades històriques, aquests
+camps retornen `null`.
+
+`GET /api/v1/admin/occupancy` accepta els filtres opcionals `from`, `to` i
+`space_id`. Per a cada espai retorna l'score mitjà, l'hora punta i l'hora amb
+menys ocupació. Si se sol·licita un espai sense dades al període, les mètriques
+retornen `null`.
+
+## Heatmap històric
+
+```text
+GET /api/v1/availability/heatmap
+```
+
+Accepta els filtres opcionals `space_id`, `from` i `to`, i retorna dies amb
+franges, `occupancy_score` i `occupancy_level` calculats des de les dades
+històriques processades. Sense dades per als filtres indicats, `days` és una
+llista buida.
+
+Exemple:
+
+```text
+/api/v1/availability/heatmap?space_id=sala-fitnes-sala-cardio&from=2026-04-01&to=2026-04-30
+```
+
 ---
 
 # 26. Tests
@@ -995,7 +1021,7 @@ Implementat:
 Pendent:
 
 ```text
-○ GET /api/v1/availability/heatmap
+○ ampliar la cobertura d'espais i franges històriques específiques
 ```
 
 Els endpoints de recomanacions, SAFi i administració utilitzen el Backend Core existent en lloc de crear una segona base de dades o un backend independent.
