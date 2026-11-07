@@ -1,50 +1,39 @@
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { errorMessage, getHeatmap, getServices } from '../services/api';
-import type { Heatmap, OccupancyLevel, Service } from '../services/api';
+import HeatmapGrid, { availabilityCell, forecastCell } from '../components/HeatmapGrid';
+import type { CellValue, HeatmapMode } from '../components/HeatmapGrid';
+import type { RootStackParamList } from '../navigation/types';
+import { errorMessage, getAvailabilityWeek, getHeatmap, getServices } from '../services/api';
+import type { AvailabilityWeek, Heatmap, Service } from '../services/api';
+import { addDays, daysFrom, formatRange, mondayOf, todayDate } from '../utils/dates';
 
-const LEVEL_LABEL: Record<OccupancyLevel, string> = {
-  low: 'baixa',
-  medium: 'mitjana',
-  high: 'alta',
-  very_high: 'molt alta',
-  unknown: 'desconeguda',
-};
+type Props = NativeStackScreenProps<RootStackParamList, 'Heatmap'>;
 
-const LEVEL_COLOR: Record<OccupancyLevel, string> = {
-  low: '#c8e6c9',
-  medium: '#fff9c4',
-  high: '#ffcc80',
-  very_high: '#ef9a9a',
-  unknown: '#e0e0e0',
-};
-
-const pad = (n: number) => String(n).padStart(2, '0');
-
-// Data LOCAL en format YYYY-MM-DD (no toISOString, que dona UTC).
-function localDate(offsetDays: number): string {
-  const now = new Date();
-  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offsetDays);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-export default function HeatmapScreen() {
-  // Els 7 dies des d'avui.
-  const from = useMemo(() => localDate(0), []);
-  const to = useMemo(() => localDate(6), []);
-
+export default function HeatmapScreen({ navigation, route }: Props) {
   const [services, setServices] = useState<Service[] | null>(null);
   const [servicesLoading, setServicesLoading] = useState(true);
   const [servicesError, setServicesError] = useState<string | null>(null);
   const [service, setService] = useState<Service | null>(null);
 
-  const [heatmap, setHeatmap] = useState<Heatmap | null>(null);
+  const [mode, setMode] = useState<HeatmapMode>('availability');
+  const [weekStart, setWeekStart] = useState(() => mondayOf(todayDate()));
+
+  const [week, setWeek] = useState<AvailabilityWeek | null>(null);
+  const [forecast, setForecast] = useState<Heatmap | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const servicesReq = useRef(0);
-  const heatmapReq = useRef(0);
+  const dataReq = useRef(0);
+
+  const today = todayDate();
+  const weekEnd = addDays(weekStart, 6);
+  const dates = useMemo(() => daysFrom(weekStart, 7), [weekStart]);
+
+  // Sense reserva possible nomes es veu la previsio.
+  const effectiveMode: HeatmapMode = service && !service.reservable ? 'forecast' : mode;
 
   const loadServices = useCallback(async () => {
     const id = ++servicesReq.current;
@@ -54,110 +43,175 @@ export default function HeatmapScreen() {
       const list = await getServices();
       if (id !== servicesReq.current) return;
       setServices(list);
+      const wanted = route.params?.serviceId;
+      setService((prev) => prev ?? list.find((s) => s.id === wanted) ?? list[0] ?? null);
     } catch (err) {
       if (id !== servicesReq.current) return;
       setServicesError(errorMessage(err));
     }
     if (id === servicesReq.current) setServicesLoading(false);
-  }, []);
+  }, [route.params?.serviceId]);
 
   useEffect(() => {
     void loadServices();
   }, [loadServices]);
 
-  const loadHeatmap = useCallback(
-    async (spaceId: string) => {
-      const id = ++heatmapReq.current;
-      setLoading(true);
-      setError(null);
-      setHeatmap(null);
-      try {
-        const result = await getHeatmap(spaceId, from, to);
-        if (id !== heatmapReq.current) return;
-        setHeatmap(result);
-      } catch (err) {
-        if (id !== heatmapReq.current) return;
-        setError(errorMessage(err));
+  const loadData = useCallback(async () => {
+    const id = ++dataReq.current;
+    setWeek(null);
+    setForecast(null);
+    setError(null);
+    if (!service) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      if (effectiveMode === 'availability') {
+        const result = await getAvailabilityWeek(service.space_id, weekStart, weekEnd);
+        if (id !== dataReq.current) return;
+        setWeek(result);
+      } else {
+        const result = await getHeatmap(service.space_id, weekStart, weekEnd);
+        if (id !== dataReq.current) return;
+        setForecast(result);
       }
-      if (id === heatmapReq.current) setLoading(false);
-    },
-    [from, to],
-  );
+    } catch (err) {
+      if (id !== dataReq.current) return;
+      setError(errorMessage(err));
+    }
+    if (id === dataReq.current) setLoading(false);
+  }, [service, effectiveMode, weekStart, weekEnd]);
 
-  function pickService(s: Service) {
-    setService(s);
-    void loadHeatmap(s.space_id);
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  // Files i cel·les: tot ve del backend; si un dia no hi es, la cel·la mostra "—".
+  const { rows, getCell, hasData } = useMemo(() => {
+    const set = new Set<string>();
+    const cells = new Map<string, CellValue>();
+    let anyKnown = false;
+    if (effectiveMode === 'availability' && week) {
+      for (const day of week.days) {
+        for (const s of day.slots) {
+          set.add(s.start);
+          cells.set(`${day.date}|${s.start}`, availabilityCell(s));
+          anyKnown = true;
+        }
+      }
+    } else if (effectiveMode === 'forecast' && forecast) {
+      for (const day of forecast.days) {
+        for (const s of day.slots) {
+          set.add(s.hour);
+          cells.set(`${day.date}|${s.hour}`, forecastCell(s));
+          if (s.occupancy_level !== 'unknown') anyKnown = true;
+        }
+      }
+    }
+    return {
+      rows: Array.from(set).sort(),
+      getCell: (date: string, row: string) => cells.get(`${date}|${row}`) ?? null,
+      hasData: anyKnown,
+    };
+  }, [effectiveMode, week, forecast]);
+
+  function pickCell(date: string, start: string) {
+    if (!service) return;
+    navigation.navigate('Reserva', { serviceId: service.id, date, start });
   }
 
-  // Columnes de la graella: les hores que retorna el backend (sense calcular ocupacio).
-  const hours = useMemo(() => {
-    const set = new Set<string>();
-    heatmap?.days.forEach((day) => day.slots.forEach((slot) => set.add(slot.hour)));
-    return Array.from(set).sort();
-  }, [heatmap]);
+  const canBook = !!service?.reservable;
+  const loaded = effectiveMode === 'availability' ? week !== null : forecast !== null;
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.step}>1. Servei</Text>
+      <Text style={styles.step}>Servei</Text>
       {servicesLoading && <ActivityIndicator />}
       {servicesError && <ErrorBox text={servicesError} onRetry={loadServices} />}
-      {services?.map((s) => (
-        <Pressable
-          key={s.id}
-          style={[styles.option, service?.id === s.id && styles.optionSelected]}
-          onPress={() => pickService(s)}
-        >
-          <Text style={styles.optionText}>{s.name}</Text>
-        </Pressable>
-      ))}
+      <View style={styles.chips}>
+        {services?.map((s) => (
+          <Pressable
+            key={s.id}
+            style={[styles.chip, service?.id === s.id && styles.chipSelected]}
+            onPress={() => setService(s)}
+          >
+            <Text style={styles.chipText}>{s.name}</Text>
+          </Pressable>
+        ))}
+      </View>
 
       {service && (
         <>
-          <Text style={styles.step}>
-            2. Ocupació ({from} a {to})
+          <View style={styles.chips}>
+            <ModeButton
+              label="Disponibilitat"
+              selected={effectiveMode === 'availability'}
+              disabled={!canBook}
+              onPress={() => setMode('availability')}
+            />
+            <ModeButton
+              label="Previsió SAFi"
+              selected={effectiveMode === 'forecast'}
+              onPress={() => setMode('forecast')}
+            />
+          </View>
+          <Text style={styles.muted}>
+            {effectiveMode === 'availability'
+              ? 'Disponibilitat: reserves actuals.'
+              : 'Previsió SAFi: estimació històrica, no és ocupació en temps real.'}
           </Text>
+          {!canBook && <Text style={styles.notice}>Servei no reservable: només previsió</Text>}
+
+          <View style={styles.weekNav}>
+            <Pressable onPress={() => setWeekStart(addDays(weekStart, -7))}>
+              <Text style={styles.weekLink}>{'< Setmana anterior'}</Text>
+            </Pressable>
+            <Text style={styles.weekLabel}>{formatRange(weekStart, weekEnd)}</Text>
+            <Pressable onPress={() => setWeekStart(addDays(weekStart, 7))}>
+              <Text style={styles.weekLink}>{'Setmana següent >'}</Text>
+            </Pressable>
+          </View>
+
           {loading && <ActivityIndicator />}
-          {error && <ErrorBox text={error} onRetry={() => loadHeatmap(service.space_id)} />}
-          {heatmap && heatmap.days.length === 0 && (
-            <Text style={styles.muted}>No hi ha dades per a aquest període</Text>
+          {error && <ErrorBox text={error} onRetry={loadData} />}
+          {!loading && !error && loaded && !hasData && (
+            <Text style={styles.muted}>
+              {effectiveMode === 'forecast'
+                ? 'Sense dades de previsió'
+                : 'No hi ha franges per a aquesta setmana'}
+            </Text>
           )}
-          {heatmap && heatmap.days.length > 0 && (
-            <ScrollView horizontal>
-              <View>
-                <View style={styles.row}>
-                  <Text style={[styles.dayCell, styles.header]}>Dia</Text>
-                  {hours.map((h) => (
-                    <Text key={h} style={[styles.cell, styles.header]}>
-                      {h}
-                    </Text>
-                  ))}
-                </View>
-                {heatmap.days.map((day) => (
-                  <View key={day.date} style={styles.row}>
-                    <Text style={styles.dayCell}>{day.date.slice(5)}</Text>
-                    {hours.map((h) => {
-                      const slot = day.slots.find((s) => s.hour === h);
-                      const level = slot?.occupancy_level ?? 'unknown';
-                      return (
-                        <View
-                          key={h}
-                          style={[styles.cell, { backgroundColor: LEVEL_COLOR[level] }]}
-                        >
-                          <Text style={styles.cellText}>{LEVEL_LABEL[level]}</Text>
-                          {slot?.occupancy_score != null && (
-                            <Text style={styles.cellScore}>{slot.occupancy_score}</Text>
-                          )}
-                        </View>
-                      );
-                    })}
-                  </View>
-                ))}
-              </View>
-            </ScrollView>
+          {!loading && !error && loaded && hasData && (
+            <HeatmapGrid
+              dates={dates}
+              rows={rows}
+              getCell={getCell}
+              mode={effectiveMode}
+              onCellPress={canBook ? pickCell : undefined}
+              isDisabled={(date) => date < today}
+            />
           )}
         </>
       )}
     </ScrollView>
+  );
+}
+
+function ModeButton(props: {
+  label: string;
+  selected: boolean;
+  disabled?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      style={[styles.chip, props.selected && styles.chipSelected, props.disabled && styles.disabled]}
+      disabled={props.disabled}
+      onPress={props.onPress}
+    >
+      <Text style={styles.chipText}>{props.label}</Text>
+    </Pressable>
   );
 }
 
@@ -174,18 +228,23 @@ function ErrorBox({ text, onRetry }: { text: string; onRetry: () => void }) {
 
 const styles = StyleSheet.create({
   container: { padding: 16, paddingBottom: 48 },
-  step: { fontSize: 18, fontWeight: 'bold', marginTop: 20, marginBottom: 8 },
+  step: { fontSize: 18, fontWeight: 'bold', marginBottom: 8 },
   muted: { color: '#666', marginVertical: 8 },
+  notice: { color: '#8a5a00', marginVertical: 4, fontWeight: 'bold' },
   error: { color: '#b00020', marginVertical: 8 },
-  option: { padding: 14, borderRadius: 10, borderWidth: 1, borderColor: '#ccc', marginBottom: 8 },
-  optionSelected: { borderColor: '#1565c0', backgroundColor: '#e3f0ff' },
-  optionText: { fontSize: 16 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
+  chip: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, borderColor: '#ccc' },
+  chipSelected: { borderColor: '#1565c0', backgroundColor: '#e3f0ff' },
+  chipText: { fontSize: 15 },
+  disabled: { opacity: 0.4 },
+  weekNav: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginVertical: 14,
+  },
+  weekLink: { color: '#1565c0', fontSize: 13 },
+  weekLabel: { fontWeight: 'bold', fontSize: 15 },
   retryButton: { padding: 12, borderRadius: 10, backgroundColor: '#eee', alignItems: 'center' },
   retryText: { fontSize: 16 },
-  row: { flexDirection: 'row' },
-  header: { fontWeight: 'bold', textAlign: 'center' },
-  dayCell: { width: 56, padding: 6, fontSize: 13 },
-  cell: { width: 72, padding: 6, borderWidth: 1, borderColor: '#fff', alignItems: 'center' },
-  cellText: { fontSize: 12 },
-  cellScore: { fontSize: 11, color: '#444' },
 });
