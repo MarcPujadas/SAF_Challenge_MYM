@@ -633,7 +633,12 @@ def test_admin_stats_returns_null_hours_without_historical_data(
 
 
 def test_analytics_routes_keep_api_v1_prefix():
-    paths = {route.path for route in main.app.routes}
+    paths = {
+        route.path
+        for route in safi_admin.router.routes
+        if hasattr(route, "path")
+    }
+
     assert "/api/v1/availability/heatmap" in paths
     assert "/api/v1/admin/occupancy" in paths
     assert "/api/v1/admin/stats" in paths
