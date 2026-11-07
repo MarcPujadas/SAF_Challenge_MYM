@@ -16,8 +16,13 @@ import type { RootStackParamList } from '../navigation/types';
 import { chatSafi, errorMessage } from '../services/api';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'SafiChat'>;
-
 type ChatMessage = { id: number; from: 'user' | 'safi'; text: string };
+
+const SUGGESTIONS = [
+  'Quan hi ha menys gent al fitness?',
+  'Quina hora em recomanes demà?',
+  'Tinc alguna reserva?',
+];
 
 export default function SafiChatScreen(_props: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -26,15 +31,14 @@ export default function SafiChatScreen(_props: Props) {
   const [error, setError] = useState<string | null>(null);
   const nextId = useRef(1);
 
-  async function send() {
-    const text = input.trim();
+  async function sendMessage(rawText: string) {
+    const text = rawText.trim();
     if (!text || sending) return;
     setMessages((prev) => [...prev, { id: nextId.current++, from: 'user', text }]);
     setInput('');
     setError(null);
     setSending(true);
     try {
-      // La resposta (tambe "No ho se..." amb can_answer false) ve del backend tal qual.
       const res = await chatSafi(text);
       setMessages((prev) => [...prev, { id: nextId.current++, from: 'safi', text: res.message }]);
     } catch (err) {
@@ -51,14 +55,33 @@ export default function SafiChatScreen(_props: Props) {
     >
       <ScrollView contentContainerStyle={styles.list}>
         {messages.length === 0 && (
-          <Text style={styles.muted}>Pregunta a SAFi sobre l'ocupació dels espais.</Text>
+          <>
+            <Text style={styles.intro}>Pregunta a SAFi sobre ocupació, disponibilitat o les teves reserves.</Text>
+            <View style={styles.suggestions}>
+              {SUGGESTIONS.map((suggestion) => (
+                <Pressable
+                  key={suggestion}
+                  style={styles.suggestion}
+                  disabled={sending}
+                  onPress={() => void sendMessage(suggestion)}
+                >
+                  <Text style={styles.suggestionText}>{suggestion}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </>
         )}
-        {messages.map((m) => (
-          <View key={m.id} style={[styles.bubble, m.from === 'user' ? styles.user : styles.safi]}>
-            {m.from === 'safi' && <Text style={styles.safiTitle}>SAFi</Text>}
-            <Text style={styles.text}>{m.text}</Text>
+
+        {messages.map((message) => (
+          <View
+            key={message.id}
+            style={[styles.bubble, message.from === 'user' ? styles.user : styles.safi]}
+          >
+            {message.from === 'safi' && <Text style={styles.safiTitle}>SAFi</Text>}
+            <Text style={styles.text}>{message.text}</Text>
           </View>
         ))}
+
         {sending && (
           <View style={styles.loadingRow}>
             <ActivityIndicator />
@@ -75,13 +98,13 @@ export default function SafiChatScreen(_props: Props) {
           onChangeText={setInput}
           placeholder="Escriu la teva pregunta"
           editable={!sending}
-          onSubmitEditing={() => void send()}
+          onSubmitEditing={() => void sendMessage(input)}
           returnKeyType="send"
         />
         <Pressable
           style={[styles.sendButton, (sending || !input.trim()) && styles.disabled]}
           disabled={sending || !input.trim()}
-          onPress={() => void send()}
+          onPress={() => void sendMessage(input)}
         >
           <Text style={styles.sendText}>Enviar</Text>
         </Pressable>
@@ -93,6 +116,10 @@ export default function SafiChatScreen(_props: Props) {
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   list: { padding: 16, paddingBottom: 24 },
+  intro: { color: '#555', marginBottom: 10, fontSize: 16 },
+  suggestions: { gap: 8, marginBottom: 18 },
+  suggestion: { padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#9c27b0', backgroundColor: '#faf5ff' },
+  suggestionText: { color: '#6a1b9a', fontWeight: '600' },
   muted: { color: '#666', marginVertical: 8 },
   error: { color: '#b00020', marginVertical: 8 },
   bubble: { padding: 12, borderRadius: 12, marginBottom: 8, maxWidth: '85%' },
