@@ -164,10 +164,17 @@ def create_reservation(
     }
 
 
-def list_user_reservations(user_id: str) -> list[dict]:
+def list_user_reservations(
+    user_id: str,
+    include_cancelled: bool = False,
+) -> list[dict]:
+    conditions = ["r.user_id = ?"]
+    if not include_cancelled:
+        conditions.append("r.status = 'confirmed'")
+
     with closing(get_connection()) as connection:
         rows = connection.execute(
-            """
+            f"""
             SELECT
                 r.id AS reservation_id,
                 r.space_id,
@@ -178,8 +185,8 @@ def list_user_reservations(user_id: str) -> list[dict]:
                 r.status
             FROM reservations r
             JOIN spaces s ON s.id = r.space_id
-            WHERE r.user_id = ? AND r.status = 'confirmed'
-            ORDER BY r.date, r.start
+            WHERE {" AND ".join(conditions)}
+            ORDER BY r.date, r.start, r.id
             """,
             (user_id,),
         ).fetchall()
