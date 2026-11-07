@@ -21,6 +21,10 @@ from app.services.recommendation_tracking_service import (
     save_recommendation_action,
 )
 
+from app.services.recommendation_analytics_service import (
+    get_recommendation_stats,
+)
+
 
 router = APIRouter(prefix="/api/v1")
 
@@ -422,5 +426,40 @@ def get_admin_occupancy(
         {
             "period": {"from": start, "to": end},
             "spaces": spaces,
+        }
+    )
+
+
+@router.get("/admin/recommendations/stats")
+def get_admin_recommendation_stats(
+    space_id: str | None = None,
+    date_from: str | None = Query(
+        default=None,
+        alias="from",
+    ),
+    date_to: str | None = Query(
+        default=None,
+        alias="to",
+    ),
+) -> dict[str, Any]:
+    start, end = parse_date_range(
+        date_from,
+        date_to,
+    )
+
+    stats = get_recommendation_stats(
+        space_id=space_id,
+        date_from=start,
+        date_to=end,
+    )
+
+    return success(
+        {
+            "period": {
+                "from": start,
+                "to": end,
+            },
+            "space_id": space_id,
+            **stats,
         }
     )
