@@ -1,9 +1,15 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+# Carrega la configuració local del backend abans d'importar els routers.
+# backend/.env no es versiona; backend/.env.example documenta les variables.
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 from app.common import ApiError, error_payload
 from app.database.database import init_db
