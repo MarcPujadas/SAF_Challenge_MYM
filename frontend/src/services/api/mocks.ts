@@ -485,6 +485,7 @@ export async function createReservation(
 
 export async function getReservations(
   userId: string,
+  includeCancelled = false,
 ): Promise<ReservationItem[]> {
   await delay();
 
@@ -492,7 +493,7 @@ export async function getReservations(
     .filter(
       (reservation) =>
         reservation.user_id === userId &&
-        reservation.status === 'confirmed',
+        (includeCancelled || reservation.status === 'confirmed'),
     )
     .map((reservation) => ({
       reservation_id:
