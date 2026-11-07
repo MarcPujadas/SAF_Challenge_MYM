@@ -650,6 +650,9 @@ RESERVATION_CONFLICT
 
 ## GET /reservations
 
+Per defecte només retorna reserves confirmades. Per consultar l'historial complet,
+incloses les cancel·lades, es pot enviar `include_cancelled=true`.
+
 ### Query parameters
 
 ```text
