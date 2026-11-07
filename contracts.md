@@ -453,6 +453,13 @@ INVALID_DATE_RANGE
 Demana al backend una recomanació de franja basada en l'ocupació històrica.
 
 La recomanació queda registrada al backend perquè posteriorment es pugui saber si l'usuari l'ha acceptat o ignorat.
+Els espais amb `spaces.type == "court"` existeixen i són vàlids, però no
+admeten recomanacions SAFi. En aquest cas l'endpoint retorna HTTP 200 amb
+`success: true`, `recommendation_id: null`, `recommended_slot: null`,
+`recommendation_available: false` i
+`unavailable_reason: "unsupported_space_type"`. `requested_slot` conserva
+l'hora sol·licitada i retorna `occupancy_score: null` i
+`occupancy_level: "unknown"`; no es calcula ni desa cap recomanació.
 
 Per al MVP, l'usuari associat és:
 
@@ -519,6 +526,9 @@ high
 ```
 
 El backend no ha de retornar `high` si les dades són insuficients o poc comparables.
+
+Per a espais court, `confidence` és `low` i `basis.historical_period` és `null`,
+ja que no s'ha generat una estimació històrica.
 
 ### Errors possibles
 

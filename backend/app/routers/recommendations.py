@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.common import ApiError, success
+from app.services.catalog_service import get_space
 from app.services.recommendation_service import recommend
 from app.services.recommendation_tracking_service import (
     save_recommendation,
@@ -41,6 +42,42 @@ def create_recommendation(
         )
         if end_minutes <= start_minutes:
             raise ValueError("preferred_end must be later than preferred_start.")
+
+        space = get_space(payload.space_id)
+        if space["type"] == "court":
+            weekday_names = (
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday",
+                "Saturday",
+                "Sunday",
+            )
+            return success(
+                {
+                    "recommendation_id": None,
+                    "requested_slot": {
+                        "start": payload.preferred_start,
+                        "occupancy_score": None,
+                        "occupancy_level": "unknown",
+                    },
+                    "recommended_slot": None,
+                    "message": (
+                        "SAFi recommendations are not available "
+                        "for court spaces."
+                    ),
+                    "confidence": "low",
+                    "basis": {
+                        "space_id": payload.space_id,
+                        "weekday": weekday_names[parsed_date.weekday()],
+                        "historical_period": None,
+                    },
+                    "recommendation_available": False,
+                    "unavailable_reason": "unsupported_space_type",
+                }
+            )
+
         result = recommend(
             payload.space_id,
             parsed_date.isoformat(),
