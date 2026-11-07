@@ -7,7 +7,7 @@ import type { CellValue, HeatmapMode } from '../components/HeatmapGrid';
 import type { RootStackParamList } from '../navigation/types';
 import { errorMessage, getAvailabilityWeek, getHeatmap, getServices } from '../services/api';
 import type { AvailabilityWeek, Heatmap, Service } from '../services/api';
-import { addDays, daysFrom, formatRange, mondayOf, todayDate } from '../utils/dates';
+import { addDays, daysFrom, formatRange, mondayOf, todayDate, weekdayShort } from '../utils/dates';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Heatmap'>;
 
@@ -116,6 +116,20 @@ export default function HeatmapScreen({ navigation, route }: Props) {
     };
   }, [effectiveMode, week, forecast]);
 
+  const bestForecast = useMemo(() => {
+    if (effectiveMode !== 'forecast' || !forecast) return null;
+    let best: { date: string; hour: string; score: number } | null = null;
+    for (const day of forecast.days) {
+      for (const slot of day.slots) {
+        if (slot.occupancy_score == null || slot.occupancy_level === 'unknown') continue;
+        if (!best || slot.occupancy_score < best.score) {
+          best = { date: day.date, hour: slot.hour, score: slot.occupancy_score };
+        }
+      }
+    }
+    return best;
+  }, [effectiveMode, forecast]);
+
   function pickCell(date: string, start: string) {
     if (!service) return;
     navigation.navigate('Reserva', { serviceId: service.id, date, start });
@@ -162,6 +176,14 @@ export default function HeatmapScreen({ navigation, route }: Props) {
               : 'Previsió SAFi: estimació històrica, no és ocupació en temps real.'}
           </Text>
           {!canBook && <Text style={styles.notice}>Servei no reservable: només previsió</Text>}
+          {bestForecast && (
+            <View style={styles.summaryBox}>
+              <Text style={styles.summaryTitle}>Millor franja prevista</Text>
+              <Text style={styles.summaryText}>
+                {weekdayShort(bestForecast.date)} {bestForecast.date} · {bestForecast.hour} · {bestForecast.score}/100
+              </Text>
+            </View>
+          )}
 
           <View style={styles.weekNav}>
             <Pressable onPress={() => setWeekStart(addDays(weekStart, -7))}>
@@ -231,6 +253,9 @@ const styles = StyleSheet.create({
   step: { fontSize: 18, fontWeight: 'bold', marginBottom: 8 },
   muted: { color: '#666', marginVertical: 8 },
   notice: { color: '#8a5a00', marginVertical: 4, fontWeight: 'bold' },
+  summaryBox: { marginTop: 8, padding: 12, borderRadius: 10, backgroundColor: '#f3e8ff', borderWidth: 1, borderColor: '#9c27b0' },
+  summaryTitle: { color: '#6a1b9a', fontWeight: 'bold' },
+  summaryText: { marginTop: 2, fontSize: 15 },
   error: { color: '#b00020', marginVertical: 8 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
   chip: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, borderColor: '#ccc' },
