@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.common import ApiError, success
-from app.services.catalog_service import get_space
+from app.services.catalog_service import supports_safi_recommendations
 from app.services.recommendation_service import recommend
 from app.services.recommendation_tracking_service import (
     save_recommendation,
@@ -43,8 +43,7 @@ def create_recommendation(
         if end_minutes <= start_minutes:
             raise ValueError("preferred_end must be later than preferred_start.")
 
-        space = get_space(payload.space_id)
-        if space["type"] == "court":
+        if not supports_safi_recommendations(payload.space_id):
             weekday_names = (
                 "Monday",
                 "Tuesday",
