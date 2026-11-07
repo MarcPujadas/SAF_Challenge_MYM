@@ -36,8 +36,16 @@ def create_reservation(payload: ReservationCreate) -> dict[str, Any]:
 
 
 @router.get("/reservations")
-def get_reservations(user_id: str = Query(...)) -> dict[str, Any]:
-    return success(list_user_reservations(user_id))
+def get_reservations(
+    user_id: str = Query(...),
+    include_cancelled: bool = Query(False),
+) -> dict[str, Any]:
+    return success(
+        list_user_reservations(
+            user_id,
+            include_cancelled=include_cancelled,
+        )
+    )
 
 
 @router.delete("/reservations/{reservation_id}")
