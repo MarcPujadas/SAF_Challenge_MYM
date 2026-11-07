@@ -489,7 +489,7 @@ Tots els endpoints d'administració utilitzen:
 {
   "success": true,
   "data": {
-    "total_reservations": 430,
+    "total_reservations": 71,
     "reservations_today": 71,
     "busiest_space": {
       "id": "fitness",
@@ -500,6 +500,40 @@ Tots els endpoints d'administració utilitzen:
   "error": null
 }
 ```
+
+---
+
+## GET /admin/stats
+
+Retorna estadístiques de les reserves creades a l'aplicació i hores d'ocupació
+quan hi ha dades processades disponibles. Els camps d'hores són `null` fins que
+la font d'ocupació estigui connectada; no s'han d'inferir només a partir de les
+reserves.
+
+### Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "total_reservations": 430,
+    "reservations_created_by_app": 71,
+    "most_used_spaces": [
+      {
+        "space_id": "fitness",
+        "name": "Sala Fitness",
+        "total_reservations": 52
+      }
+    ],
+    "busiest_hour": null,
+    "quietest_hour": null
+  },
+  "error": null
+}
+```
+
+`busiest_hour` i `quietest_hour` utilitzen ocupació processada, no recomptes de
+reserves. Els camps han de ser `null` mentre aquesta font no estigui disponible.
 
 ---
 
