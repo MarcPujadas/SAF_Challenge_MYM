@@ -17,7 +17,7 @@ export function errorMessage(err: unknown): string {
       case 'INVALID_DATE_RANGE':
         return 'El rang de dates no és vàlid.';
       case 'OCCUPANCY_DATA_UNAVAILABLE':
-        return 'No ho sé amb les dades disponibles.';
+        return 'No tenim prou dades històriques d’aquesta franja per fer una previsió fiable.';
       case 'RESERVATION_NOT_FOUND':
         return 'Aquesta reserva no existeix.';
       case 'RESERVATION_ALREADY_CANCELLED':
