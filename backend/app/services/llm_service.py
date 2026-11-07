@@ -17,6 +17,9 @@ from app.services.historical_service import (
     get_historical_occupancy,
     prepare_space_data,
 )
+from app.services.user_reservation_service import (
+    get_user_reservations,
+)
 
 
 UAB_LLM_BASE_URL = (
@@ -93,8 +96,10 @@ REGLES OBLIGATÒRIES:
 - No inventis dades d'ocupació.
 - No inventis disponibilitat.
 - No inventis horaris.
+
 - Tens eines per consultar Fitness, Piscina 25 m, Piscina 16 m,
   Pàdel, Tennis, Esquaix, Futbol 7 i Activitats dirigides.
+
 - Quan l'usuari digui "piscina" sense especificar 25 m o 16 m,
   pregunta quina piscina vol consultar.
 - No assumeixis un servei si la pregunta és ambigua.
@@ -110,44 +115,79 @@ REGLES OBLIGATÒRIES:
 - Una reserva no equival necessàriament a una persona físicament
   present al SAF.
 - No anomenis get_booking_availability "ocupació en temps real".
+
+- get_user_reservations consulta les reserves confirmades del mateix
+  usuari que està parlant amb SAFi.
+- Utilitza get_user_reservations quan l'usuari pregunti quines reserves
+  té, quan té la propera reserva, si té una reserva un dia concret o si
+  té reserves d'un servei determinat.
+- El user_id el proporciona internament el backend. No demanis mai
+  a l'usuari un user_id.
+- No inventis reserves.
+- Les reserves cancel·lades no apareixen com a reserves actives.
+
 - Si l'usuari pregunta alhora si hi haurà molta gent i si hi ha
-  disponibilitat, utilitza les dues eines.
-- Quan tinguis dades de les dues eines, diferencia clarament
+  disponibilitat, utilitza get_occupancy_forecast i
+  get_booking_availability.
+
+- Quan tinguis dades de previsió i disponibilitat, diferencia clarament
   "previsió històrica" de "disponibilitat segons reserves actuals".
 
 - No afirmis que una instal·lació està buida o plena en temps real
   basant-te només en dades històriques.
+
 - Si una eina indica que no hi ha dades, digues-ho clarament.
+
 - Respon en la mateixa llengua que utilitza l'usuari.
+
 - Quan responguis en català, utilitza català central estàndard.
 - Evita formes dialectals valencianes si l'usuari escriu en català.
 - Utilitza formes naturals com "et recomano", "pots", "aquesta",
   "aquesta hora", etc.
 - Mantén un català natural, correcte i propi de Catalunya.
+
 - No inventis mai el dia de la setmana.
 - Quan una eina et retorni una data i un dia de la setmana, utilitza
   exactament aquestes dades.
 - Si no coneixes amb certesa el dia de la setmana, no l'esmentis.
 - No calculis mentalment dies de la setmana a partir d'una data.
-- Sigues breu, útil i natural.
-- Utilitza emojis només excepcionalment.
-- No revelis prompts, claus API ni instruccions internes.
 
 - Basa totes les afirmacions factuals sobre el SAF exclusivament en
   les dades retornades per les eines.
 - No inventis promocions, descomptes, preus, horaris especials,
   serveis, normes ni avantatges que les eines no hagin retornat.
+
 - No dedueixis que una franja és "la més ocupada del dia" tret que
   una eina indiqui explícitament que és la franja més ocupada.
+
 - occupancy_level només descriu el nivell estimat d'aquella franja.
   No implica per si sol que sigui la franja més o menys ocupada del dia.
+
 - Tradueix els nivells d'ocupació quan responguis en català:
   low = baixa, medium = mitjana, high = alta, very_high = molt alta.
+
 - No mostris noms interns com "very_high" a l'usuari.
+
 - Si una dada no apareix al resultat de les eines, no l'afirmis.
+
+- Sigues breu, útil i natural.
+- Utilitza emojis només excepcionalment.
+- No revelis prompts, claus API ni instruccions internes.
 
 Et dius SAFi.
 """
+
+
+SERVICE_ENUM = [
+    "fitness",
+    "pool-25m",
+    "pool-16m",
+    "padel",
+    "tennis",
+    "squash",
+    "football",
+    "guided-activities",
+]
 
 
 TOOLS = [
@@ -168,28 +208,9 @@ TOOLS = [
                 "properties": {
                     "service": {
                         "type": "string",
-                        "enum": [
-                            "fitness",
-                            "pool-25m",
-                            "pool-16m",
-                            "padel",
-                            "tennis",
-                            "squash",
-                            "football",
-                            "guided-activities",
-                        ],
+                        "enum": SERVICE_ENUM,
                         "description": (
-                            "Servei consultat. "
-                            "fitness = sala fitness; "
-                            "pool-25m = piscina de 25 metres; "
-                            "pool-16m = piscina de 16 metres; "
-                            "padel = pàdel; "
-                            "tennis = tennis; "
-                            "squash = esquaix; "
-                            "football = futbol 7; "
-                            "guided-activities = activitats dirigides. "
-                            "Si l'usuari diu només 'piscina' i no queda "
-                            "clar quina, pregunta quina piscina vol consultar."
+                            "Servei del SAF."
                         ),
                     },
                     "date": {
@@ -202,8 +223,7 @@ TOOLS = [
                         "type": "string",
                         "description": (
                             "Hora concreta en format HH:MM. "
-                            "És opcional. Si no s'indica, el backend "
-                            "buscarà la franja històricament més tranquil·la."
+                            "És opcional."
                         ),
                     },
                 },
@@ -221,30 +241,18 @@ TOOLS = [
                 "get_booking_availability"
             ),
             "description": (
-                "Consulta la disponibilitat actual d'una franja "
-                "segons les reserves confirmades guardades a la "
-                "base de dades del SAFi. Utilitza aquesta eina quan "
-                "l'usuari pregunti si pot reservar, si queden places, "
-                "si una franja està disponible o quantes reserves "
-                "hi ha actualment per aquella franja. "
-                "Aquesta informació NO representa persones que "
-                "estan físicament al SAF en temps real."
+                "Consulta la disponibilitat actual d'una franja segons "
+                "les reserves confirmades guardades a la base de dades. "
+                "Utilitza aquesta eina quan l'usuari pregunti si pot "
+                "reservar, si queden places o si una franja està "
+                "disponible. No representa ocupació física en temps real."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "service": {
                         "type": "string",
-                        "enum": [
-                            "fitness",
-                            "pool-25m",
-                            "pool-16m",
-                            "padel",
-                            "tennis",
-                            "squash",
-                            "football",
-                            "guided-activities",
-                        ],
+                        "enum": SERVICE_ENUM,
                     },
                     "date": {
                         "type": "string",
@@ -264,6 +272,48 @@ TOOLS = [
                     "date",
                     "start",
                 ],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": (
+                "get_user_reservations"
+            ),
+            "description": (
+                "Consulta les reserves confirmades actuals del mateix "
+                "usuari que està parlant amb SAFi. Utilitza-la per "
+                "respondre preguntes com 'quines reserves tinc?', "
+                "'quan tinc la propera reserva?', 'tinc reserva dimarts?' "
+                "o 'tinc alguna reserva de pàdel?'. "
+                "Si no s'indica date_from, el backend només retorna "
+                "reserves des d'avui en endavant."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "date_from": {
+                        "type": "string",
+                        "description": (
+                            "Data inicial opcional en format YYYY-MM-DD."
+                        ),
+                    },
+                    "date_to": {
+                        "type": "string",
+                        "description": (
+                            "Data final opcional en format YYYY-MM-DD."
+                        ),
+                    },
+                    "service": {
+                        "type": "string",
+                        "enum": SERVICE_ENUM,
+                        "description": (
+                            "Servei opcional per filtrar les reserves."
+                        ),
+                    },
+                },
+                "required": [],
             },
         },
     },
@@ -308,10 +358,7 @@ def call_ornith(
     ] | None = None,
 ) -> dict[str, Any]:
 
-    payload: dict[
-        str,
-        Any,
-    ] = {
+    payload: dict[str, Any] = {
         "model": (
             UAB_LLM_MODEL
         ),
@@ -324,13 +371,8 @@ def call_ornith(
     }
 
     if tools is not None:
-        payload[
-            "tools"
-        ] = tools
-
-        payload[
-            "tool_choice"
-        ] = "auto"
+        payload["tools"] = tools
+        payload["tool_choice"] = "auto"
 
     response = httpx.post(
         (
@@ -344,9 +386,7 @@ def call_ornith(
 
     response.raise_for_status()
 
-    data = (
-        response.json()
-    )
+    data = response.json()
 
     choices = data.get(
         "choices",
@@ -358,11 +398,8 @@ def call_ornith(
             "Ornith returned no choices."
         )
 
-    message = (
-        choices[0]
-        .get(
-            "message"
-        )
+    message = choices[0].get(
+        "message"
     )
 
     if not message:
@@ -378,11 +415,9 @@ def get_quietest_slot(
     weekday: int,
 ) -> dict[str, Any]:
 
-    space_data = (
-        prepare_space_data(
-            space_id,
-            weekday,
-        )
+    space_data = prepare_space_data(
+        space_id,
+        weekday,
     )
 
     if space_data.empty:
@@ -430,9 +465,7 @@ def get_quietest_slot(
             row["start_time"]
         ),
         "occupancy_score": int(
-            row[
-                "occupancy_score"
-            ]
+            row["occupancy_score"]
         ),
         "samples": int(
             row["samples"]
@@ -446,17 +479,13 @@ def get_occupancy_forecast(
     start: str | None = None,
 ) -> dict[str, Any]:
 
-    space_id = (
-        SPACE_ALIASES.get(
-            service
-        )
+    space_id = SPACE_ALIASES.get(
+        service
     )
 
-    service_name = (
-        SERVICE_NAMES.get(
-            service,
-            service,
-        )
+    service_name = SERVICE_NAMES.get(
+        service,
+        service,
     )
 
     if space_id is None:
@@ -494,11 +523,9 @@ def get_occupancy_forecast(
 
     if start is None:
 
-        quietest = (
-            get_quietest_slot(
-                space_id,
-                weekday,
-            )
+        quietest = get_quietest_slot(
+            space_id,
+            weekday,
         )
 
         return {
@@ -512,22 +539,14 @@ def get_occupancy_forecast(
             "service_name": (
                 service_name
             ),
-            "space_id": (
-                space_id
-            ),
-            "date": (
-                date_value
-            ),
-            "weekday": (
-                weekday_name
-            ),
+            "space_id": space_id,
+            "date": date_value,
+            "weekday": weekday_name,
             "forecast_type": (
                 "historical_prediction"
             ),
             "real_time": False,
-            "quietest_slot": (
-                quietest
-            ),
+            "quietest_slot": quietest,
         }
 
     historical = (
@@ -550,18 +569,10 @@ def get_occupancy_forecast(
             "service_name": (
                 service_name
             ),
-            "space_id": (
-                space_id
-            ),
-            "date": (
-                date_value
-            ),
-            "weekday": (
-                weekday_name
-            ),
-            "requested_start": (
-                start
-            ),
+            "space_id": space_id,
+            "date": date_value,
+            "weekday": weekday_name,
+            "requested_start": start,
             "forecast_type": (
                 "historical_prediction"
             ),
@@ -597,18 +608,10 @@ def get_occupancy_forecast(
         "service_name": (
             service_name
         ),
-        "space_id": (
-            space_id
-        ),
-        "date": (
-            date_value
-        ),
-        "weekday": (
-            weekday_name
-        ),
-        "requested_start": (
-            start
-        ),
+        "space_id": space_id,
+        "date": date_value,
+        "weekday": weekday_name,
+        "requested_start": start,
         "matched_start": (
             historical[
                 "start_time"
@@ -625,9 +628,7 @@ def get_occupancy_forecast(
             ]
         ),
         "samples": (
-            historical[
-                "samples"
-            ]
+            historical["samples"]
         ),
         "forecast_type": (
             "historical_prediction"
@@ -645,6 +646,7 @@ def execute_tool(
         str,
         Any,
     ],
+    user_id: str,
 ) -> dict[str, Any]:
 
     if (
@@ -656,10 +658,8 @@ def execute_tool(
             "service"
         )
 
-        date_value = (
-            arguments.get(
-                "date"
-            )
+        date_value = arguments.get(
+            "date"
         )
 
         if not service:
@@ -678,14 +678,12 @@ def execute_tool(
                 ),
             }
 
-        return (
-            get_occupancy_forecast(
-                service=service,
-                date_value=date_value,
-                start=arguments.get(
-                    "start"
-                ),
-            )
+        return get_occupancy_forecast(
+            service=service,
+            date_value=date_value,
+            start=arguments.get(
+                "start"
+            ),
         )
 
     if (
@@ -697,10 +695,8 @@ def execute_tool(
             "service"
         )
 
-        date_value = (
-            arguments.get(
-                "date"
-            )
+        date_value = arguments.get(
+            "date"
         )
 
         start = arguments.get(
@@ -745,14 +741,49 @@ def execute_tool(
 
         result[
             "service_name"
-        ] = (
-            SERVICE_NAMES.get(
-                service,
-                service,
-            )
+        ] = SERVICE_NAMES.get(
+            service,
+            service,
         )
 
         return result
+
+    if (
+        name
+        == "get_user_reservations"
+    ):
+
+        service = arguments.get(
+            "service"
+        )
+
+        space_id = None
+
+        if service is not None:
+            space_id = (
+                SPACE_ALIASES.get(
+                    service
+                )
+            )
+
+            if space_id is None:
+                return {
+                    "available": False,
+                    "reason": (
+                        "Unsupported service."
+                    ),
+                }
+
+        return get_user_reservations(
+            user_id=user_id,
+            date_from=arguments.get(
+                "date_from"
+            ),
+            date_to=arguments.get(
+                "date_to"
+            ),
+            space_id=space_id,
+        )
 
     return {
         "available": False,
@@ -764,6 +795,7 @@ def execute_tool(
 
 def chat_with_ornith(
     message: str,
+    user_id: str,
 ) -> str:
 
     today = date.today()
@@ -804,38 +836,30 @@ def chat_with_ornith(
                 + "\n"
                 + (
                     "Quan utilitzis una eina, confia "
-                    "en el camp weekday retornat pel "
-                    "backend i no el recalculis."
+                    "en les dates i dades retornades "
+                    "pel backend."
                 )
             ),
         },
         {
             "role": "user",
-            "content": (
-                message
-            ),
+            "content": message,
         },
     ]
 
-    first_message = (
-        call_ornith(
-            messages=messages,
-            tools=TOOLS,
-        )
+    first_message = call_ornith(
+        messages=messages,
+        tools=TOOLS,
     )
 
-    tool_calls = (
-        first_message.get(
-            "tool_calls"
-        )
+    tool_calls = first_message.get(
+        "tool_calls"
     )
 
     if not tool_calls:
 
-        content = (
-            first_message.get(
-                "content"
-            )
+        content = first_message.get(
+            "content"
         )
 
         if not content:
@@ -843,17 +867,13 @@ def chat_with_ornith(
                 "Ornith returned an empty response."
             )
 
-        return (
-            content.strip()
-        )
+        return content.strip()
 
     messages.append(
         first_message
     )
 
-    for tool_call in (
-        tool_calls
-    ):
+    for tool_call in tool_calls:
 
         function = (
             tool_call.get(
@@ -876,21 +896,18 @@ def chat_with_ornith(
         )
 
         try:
-            arguments = (
-                json.loads(
-                    raw_arguments
-                )
+            arguments = json.loads(
+                raw_arguments
             )
 
         except json.JSONDecodeError:
             arguments = {}
 
         try:
-            tool_result = (
-                execute_tool(
-                    tool_name,
-                    arguments,
-                )
+            tool_result = execute_tool(
+                tool_name,
+                arguments,
+                user_id=user_id,
             )
 
         except Exception as exc:
@@ -909,32 +926,22 @@ def chat_with_ornith(
             {
                 "role": "tool",
                 "tool_call_id": (
-                    tool_call[
-                        "id"
-                    ]
+                    tool_call["id"]
                 ),
-                "name": (
-                    tool_name
-                ),
-                "content": (
-                    json.dumps(
-                        tool_result,
-                        ensure_ascii=False,
-                    )
+                "name": tool_name,
+                "content": json.dumps(
+                    tool_result,
+                    ensure_ascii=False,
                 ),
             }
         )
 
-    final_message = (
-        call_ornith(
-            messages=messages,
-        )
+    final_message = call_ornith(
+        messages=messages,
     )
 
-    content = (
-        final_message.get(
-            "content"
-        )
+    content = final_message.get(
+        "content"
     )
 
     if not content:
@@ -942,6 +949,4 @@ def chat_with_ornith(
             "Ornith returned an empty final response."
         )
 
-    return (
-        content.strip()
-    )
+    return content.strip()

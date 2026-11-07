@@ -386,10 +386,9 @@ def chat_with_safi_llm(
         )
 
     try:
-        message = (
-            chat_with_ornith(
-                payload.message
-            )
+        message = chat_with_ornith(
+            message=payload.message,
+            user_id=payload.user_id,
         )
 
     except httpx.HTTPError as exc:
