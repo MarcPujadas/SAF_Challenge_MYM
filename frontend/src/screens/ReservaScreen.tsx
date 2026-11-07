@@ -29,8 +29,6 @@ import { addDays, todayDate } from '../utils/dates';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Reserva'>;
 
-const DAY_NAMES = ['Diumenge', 'Dilluns', 'Dimarts', 'Dimecres', 'Dijous', 'Divendres', 'Dissabte'];
-
 const LEVEL_LABEL: Record<OccupancyLevel, string> = {
   low: 'baixa',
   medium: 'mitjana',
@@ -39,27 +37,11 @@ const LEVEL_LABEL: Record<OccupancyLevel, string> = {
   unknown: 'desconeguda',
 };
 
-type Day = { date: string; name: string };
-
-const pad = (n: number) => String(n).padStart(2, '0');
-
-// Data LOCAL en format YYYY-MM-DD (no toISOString, que dona UTC).
-function nextDays(): Day[] {
-  const now = new Date();
-  const days: Day[] = [];
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
-    days.push({
-      date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
-      name: DAY_NAMES[d.getDay()],
-    });
-  }
-  return days;
-}
-
 export default function ReservaScreen({ navigation, route }: Props) {
-  const days = useMemo(nextDays, []);
-  const dayDates = useMemo(() => days.map((d) => d.date), [days]);
+  const dayDates = useMemo(
+    () => Array.from({ length: 7 }, (_, index) => addDays(todayDate(), index)),
+    [],
+  );
 
   // Mini heatmap (pas 2): propers 7 dies.
   const [miniMode, setMiniMode] = useState<HeatmapMode>('availability');
@@ -211,7 +193,34 @@ export default function ReservaScreen({ navigation, route }: Props) {
     [],
   );
 
+  function resetSelection() {
+    availReq.current++;
+    adviceReq.current++;
+    miniReq.current++;
+    setService(null);
+    setDate(null);
+    setAvailability(null);
+    setAvailLoading(false);
+    setAvailError(null);
+    setSlot(null);
+    setAdvice(null);
+    setAdviceLoading(false);
+    setAdviceFailed(false);
+    setAdviceNoData(null);
+    setAdviceDismissed(false);
+    setSubmitError(null);
+    setMiniWeek(null);
+    setMiniForecast(null);
+    setMiniLoading(false);
+    setMiniError(null);
+  }
+
   function pickService(s: Service) {
+    if (service?.id === s.id) {
+      resetSelection();
+      return;
+    }
+
     availReq.current++;
     adviceReq.current++;
     setService(s);
@@ -226,13 +235,6 @@ export default function ReservaScreen({ navigation, route }: Props) {
     setAdviceFailed(false);
     setAdviceNoData(null);
     setSubmitError(null);
-  }
-
-  function pickDay(day: string) {
-    if (!service) return;
-    setDate(day);
-    setSubmitError(null);
-    void loadAvailability(service.space_id, day);
   }
 
   // Cel·la del mini heatmap: selecciona dia i franja automaticament.
@@ -297,10 +299,7 @@ export default function ReservaScreen({ navigation, route }: Props) {
     } catch (err) {
       setSubmitting(false);
       setSubmitError(errorMessage(err));
-      if (
-        err instanceof ApiError &&
-        (err.code === 'SLOT_NOT_AVAILABLE' || err.code === 'RESERVATION_CONFLICT')
-      ) {
+      if (err instanceof ApiError && err.code === 'SLOT_NOT_AVAILABLE') {
         void loadAvailability(service.space_id, date);
       }
     }
@@ -352,7 +351,7 @@ export default function ReservaScreen({ navigation, route }: Props) {
       <Text style={styles.step}>1. Servei</Text>
       {servicesLoading && <ActivityIndicator />}
       {servicesError && <ErrorBox text={servicesError} onRetry={loadServices} />}
-      {services?.map((s) => (
+      {(service ? [service] : services)?.map((s) => (
         <Option
           key={s.id}
           label={s.name}
@@ -361,6 +360,11 @@ export default function ReservaScreen({ navigation, route }: Props) {
           onPress={() => pickService(s)}
         />
       ))}
+      {service && (
+        <Text style={styles.muted}>
+          Toca de nou el servei seleccionat per canviar d'esport.
+        </Text>
+      )}
 
       {/* 2. Mini heatmap */}
       {service && (
@@ -404,46 +408,23 @@ export default function ReservaScreen({ navigation, route }: Props) {
               selected={date && slot ? { date, row: slot.start } : null}
             />
           )}
-        </>
-      )}
 
-      {/* 3. Dia i hora */}
-      {service && (
-        <>
-          <Text style={styles.step}>3. Dia i hora</Text>
-          {days.map((d) => (
-            <Option
-              key={d.date}
-              label={`${d.name} ${d.date}`}
-              selected={date === d.date}
-              disabled={submitting}
-              onPress={() => pickDay(d.date)}
-            />
-          ))}
-        </>
-      )}
-
-      {/* Franges del dia */}
-      {service && date && (
-        <>
           {availLoading && <ActivityIndicator />}
-          {availError && (
-            <ErrorBox text={availError} onRetry={() => loadAvailability(service.space_id, date)} />
-          )}
-          {availability && availability.slots.length === 0 && (
-            <Text style={styles.muted}>No hi ha franges disponibles</Text>
-          )}
-          {availability?.slots.map((s) => (
-            <Option
-              key={`${s.start}-${s.end}`}
-              label={`${s.start}-${s.end}  ·  previsió ${LEVEL_LABEL[s.occupancy_level]}${
-                s.available ? '' : '  ·  no disponible'
-              }`}
-              selected={slot?.start === s.start && slot?.end === s.end}
-              disabled={!s.available || submitting}
-              onPress={() => void pickSlot(s)}
+          {availError && date && (
+            <ErrorBox
+              text={availError}
+              onRetry={() =>
+                loadAvailability(
+                  service.space_id,
+                  date,
+                  slot ? { service, start: slot.start } : undefined,
+                )
+              }
             />
-          ))}
+          )}
+          <Text style={styles.muted}>
+            Selecciona el dia i l'hora directament al heatmap.
+          </Text>
         </>
       )}
 
@@ -469,10 +450,10 @@ export default function ReservaScreen({ navigation, route }: Props) {
         </View>
       )}
 
-      {/* 4. Avis SAFi + 5. Confirmar */}
+      {/* 3. Avis SAFi + 4. Confirmar */}
       {slot && (
         <>
-          <Text style={styles.step}>4. SAFi</Text>
+          <Text style={styles.step}>3. SAFi</Text>
           {adviceLoading && <ActivityIndicator />}
           {advice && !adviceDismissed && (
             <View style={styles.safiBox}>
@@ -521,7 +502,7 @@ export default function ReservaScreen({ navigation, route }: Props) {
             <Text style={styles.muted}>SAFi no està disponible ara mateix. Pots confirmar igualment.</Text>
           )}
 
-          <Text style={styles.step}>5. Confirmar</Text>
+          <Text style={styles.step}>4. Confirmar</Text>
           {submitError && <Text style={styles.error}>{submitError}</Text>}
           <Pressable
             style={[styles.confirmButton, submitting && styles.disabled]}
