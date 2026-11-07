@@ -12,6 +12,10 @@ export function errorMessage(err: unknown): string {
         return 'L\'hora escollida no és vàlida.';
       case 'RESERVATION_CONFLICT':
         return 'Ja hi ha una reserva en aquesta franja.';
+      case 'INVALID_DATE':
+        return 'La data escollida no és vàlida.';
+      case 'INVALID_DATE_RANGE':
+        return 'El rang de dates no és vàlid.';
       case 'OCCUPANCY_DATA_UNAVAILABLE':
         return 'No ho sé amb les dades disponibles.';
       case 'RESERVATION_NOT_FOUND':

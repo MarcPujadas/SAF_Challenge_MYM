@@ -1,6 +1,7 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import ConfirmacionScreen from '../screens/ConfirmacionScreen';
+import HeatmapScreen from '../screens/HeatmapScreen';
 import HomeScreen from '../screens/HomeScreen';
 import MevesReservesScreen from '../screens/MevesReservesScreen';
 import ReservaScreen from '../screens/ReservaScreen';
@@ -21,6 +22,7 @@ export default function RootNavigator() {
         options={{ title: 'Les meves reserves' }}
       />
       <Stack.Screen name="SafiChat" component={SafiChatScreen} options={{ title: 'SAFi' }} />
+      <Stack.Screen name="Heatmap" component={HeatmapScreen} options={{ title: 'Disponibilitat' }} />
     </Stack.Navigator>
   );
 }

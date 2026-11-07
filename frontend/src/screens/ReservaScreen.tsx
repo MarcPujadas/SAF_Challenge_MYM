@@ -9,6 +9,7 @@ import {
   errorMessage,
   getAvailability,
   getServices,
+  postRecommendationAction,
   postRecommendations,
 } from '../services/api';
 import type { Availability, OccupancyLevel, Recommendation, Service, Slot } from '../services/api';
@@ -75,6 +76,17 @@ export default function ReservaScreen({ navigation }: Props) {
   const servicesReq = useRef(0);
   const availReq = useRef(0);
   const adviceReq = useRef(0);
+
+  // recommendation_id que ja tenen una accio enviada (maxim una per recomanacio).
+  const actedRecs = useRef(new Set<string>());
+
+  // Envia l'accio en segon pla: no bloqueja ni mostra errors a l'usuari.
+  function sendRecommendationAction(rec: Recommendation | null, action: 'accepted' | 'ignored') {
+    if (!rec || !rec.recommended_slot) return;
+    if (actedRecs.current.has(rec.recommendation_id)) return;
+    actedRecs.current.add(rec.recommendation_id);
+    postRecommendationAction(rec.recommendation_id, action).catch(() => {});
+  }
 
   const loadServices = useCallback(async () => {
     const id = ++servicesReq.current;
@@ -182,6 +194,7 @@ export default function ReservaScreen({ navigation }: Props) {
         end: slot.end,
       });
       setSubmitting(false);
+      sendRecommendationAction(advice, 'ignored');
       navigation.navigate('Confirmacion', { reservation, spaceName: service.name });
     } catch (err) {
       setSubmitting(false);
@@ -272,7 +285,10 @@ export default function ReservaScreen({ navigation }: Props) {
                 <Pressable
                   style={styles.altButton}
                   disabled={submitting}
-                  onPress={() => void pickSlot(altSlot)}
+                  onPress={() => {
+                    sendRecommendationAction(advice, 'accepted');
+                    void pickSlot(altSlot);
+                  }}
                 >
                   <Text style={styles.altButtonText}>Canviar a {altSlot.start}</Text>
                 </Pressable>

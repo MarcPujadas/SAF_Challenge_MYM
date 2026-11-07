@@ -3,7 +3,10 @@ import { USE_MOCKS } from './config';
 import * as mocks from './mocks';
 import type {
   Availability,
+  Heatmap,
   Recommendation,
+  RecommendationAction,
+  RecommendationActionType,
   RecommendationRequest,
   ReservationCancelled,
   ReservationCreated,
@@ -31,6 +34,27 @@ export function postRecommendations(req: RecommendationRequest): Promise<Recomme
   return USE_MOCKS
     ? mocks.postRecommendations(req)
     : request<Recommendation>('POST', '/recommendations', { body: req });
+}
+
+export function postRecommendationAction(
+  recommendationId: string,
+  action: RecommendationActionType,
+): Promise<RecommendationAction> {
+  return USE_MOCKS
+    ? mocks.postRecommendationAction(recommendationId, action)
+    : request<RecommendationAction>(
+        'POST',
+        `/recommendations/${encodeURIComponent(recommendationId)}/action`,
+        { body: { action } },
+      );
+}
+
+export function getHeatmap(spaceId: string, from: string, to: string): Promise<Heatmap> {
+  return USE_MOCKS
+    ? mocks.getHeatmap(spaceId, from, to)
+    : request<Heatmap>('GET', '/availability/heatmap', {
+        query: { space_id: spaceId, from, to },
+      });
 }
 
 export function createReservation(

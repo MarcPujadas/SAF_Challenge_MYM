@@ -5,7 +5,10 @@ import { ApiError } from './client';
 
 import type {
   Availability,
+  Heatmap,
   Recommendation,
+  RecommendationAction,
+  RecommendationActionType,
   RecommendationRequest,
   ReservationCancelled,
   ReservationCreated,
@@ -260,6 +263,8 @@ export async function postRecommendations(
   requireSpace(req.space_id);
 
   return {
+    recommendation_id: `rec_mock_${Date.now().toString(16)}`,
+
     requested_slot: {
       start: '18:00',
       occupancy_score: 89,
@@ -282,6 +287,54 @@ export async function postRecommendations(
       weekday: 'Tuesday',
       historical_period: '2026-04-01 to 2026-10-31',
     },
+  };
+}
+
+
+// ---------------------------------------------------------
+// POST /recommendations/{recommendation_id}/action
+// ---------------------------------------------------------
+
+export async function postRecommendationAction(
+  recommendationId: string,
+  action: RecommendationActionType,
+): Promise<RecommendationAction> {
+  await delay();
+
+  return { recommendation_id: recommendationId, action };
+}
+
+
+// ---------------------------------------------------------
+// GET /availability/heatmap
+// ---------------------------------------------------------
+
+export async function getHeatmap(
+  spaceId: string,
+  from: string,
+  to: string,
+): Promise<Heatmap> {
+  await delay();
+
+  requireSpace(spaceId);
+
+  if (from > to) {
+    throw new ApiError('INVALID_DATE_RANGE', 'Rang de dates incorrecte.');
+  }
+
+  // Dades fixes (no es calcula res): el primer dia del rang, amb dues franges.
+  return {
+    space_id: spaceId,
+    days: [
+      {
+        date: from,
+        slots: [
+          { hour: '09:45', occupancy_score: 31, occupancy_level: 'low' },
+          { hour: '12:00', occupancy_score: null, occupancy_level: 'unknown' },
+          { hour: '18:30', occupancy_score: 91, occupancy_level: 'very_high' },
+        ],
+      },
+    ],
   };
 }
 

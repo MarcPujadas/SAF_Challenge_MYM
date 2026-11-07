@@ -6,4 +6,5 @@ export type RootStackParamList = {
   Confirmacion: { reservation: ReservationCreated; spaceName: string };
   MevesReserves: undefined;
   SafiChat: undefined;
+  Heatmap: undefined;
 };

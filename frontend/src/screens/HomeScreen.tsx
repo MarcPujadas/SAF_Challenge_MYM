@@ -18,6 +18,9 @@ export default function HomeScreen({ navigation }: Props) {
       <Pressable style={styles.secondary} onPress={() => navigation.navigate('SafiChat')}>
         <Text style={styles.secondaryText}>SAFi</Text>
       </Pressable>
+      <Pressable style={styles.secondary} onPress={() => navigation.navigate('Heatmap')}>
+        <Text style={styles.secondaryText}>Disponibilitat</Text>
+      </Pressable>
     </View>
   );
 }
