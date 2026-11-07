@@ -11,6 +11,11 @@ from app.services.recommendation_service import recommend
 from app.services.safi_service import advice, chat
 from app.services.validation import validate_date_time
 
+from app.services.recommendation_tracking_service import (
+    save_recommendation,
+    save_recommendation_action,
+)
+
 
 router = APIRouter(prefix="/api/v1")
 
@@ -21,6 +26,8 @@ class RecommendationRequest(BaseModel):
     preferred_start: str
     preferred_end: str
 
+class RecommendationActionRequest(BaseModel):
+    action: str
 
 class SAFiAdviceRequest(BaseModel):
     space_id: str
@@ -66,33 +73,111 @@ def parse_date(value: str | None, field: str) -> str | None:
 
 
 @router.post("/recommendations")
-def create_recommendation(payload: RecommendationRequest) -> dict[str, Any]:
+def create_recommendation(
+    payload: RecommendationRequest,
+) -> dict[str, Any]:
     try:
         parsed_date, start_minutes = validate_date_time(
             payload.date,
             payload.preferred_start,
         )
+
         _, end_minutes = validate_date_time(
             payload.date,
             payload.preferred_end,
         )
+
         if end_minutes <= start_minutes:
-            raise ValueError("preferred_end must be later than preferred_start.")
+            raise ValueError(
+                "preferred_end must be later "
+                "than preferred_start."
+            )
+
         result = recommend(
             payload.space_id,
             parsed_date.isoformat(),
             payload.preferred_start,
             payload.preferred_end,
         )
+
     except ValueError as exc:
-        raise ApiError("INVALID_TIME", str(exc), 400) from exc
-    if result["requested_slot"]["occupancy_score"] is None:
+        raise ApiError(
+            "INVALID_TIME",
+            str(exc),
+            400,
+        ) from exc
+
+    if (
+        result["requested_slot"][
+            "occupancy_score"
+        ]
+        is None
+    ):
         raise ApiError(
             "OCCUPANCY_DATA_UNAVAILABLE",
-            "No hi ha dades d'ocupació disponibles per a aquesta consulta.",
+            (
+                "No hi ha dades d'ocupació "
+                "disponibles per a aquesta consulta."
+            ),
             404,
         )
+
+    recommended_slot = (
+        result["recommended_slot"]
+    )
+
+    recommendation_id = save_recommendation(
+        user_id="demo-user",
+        space_id=payload.space_id,
+        date=parsed_date.isoformat(),
+        requested_start=(
+            result["requested_slot"]["start"]
+        ),
+        recommended_start=(
+            recommended_slot["start"]
+            if recommended_slot is not None
+            else None
+        ),
+        requested_score=(
+            result[
+                "requested_slot"
+            ]["occupancy_score"]
+        ),
+        recommended_score=(
+            recommended_slot["occupancy_score"]
+            if recommended_slot is not None
+            else None
+        ),
+    )
+
+    result["recommendation_id"] = (
+        recommendation_id
+    )
+
     return success(result)
+
+
+@router.post(
+    "/recommendations/{recommendation_id}/action"
+)
+def register_recommendation_action(
+    recommendation_id: str,
+    payload: RecommendationActionRequest,
+) -> dict[str, Any]:
+
+    save_recommendation_action(
+        recommendation_id,
+        payload.action,
+    )
+
+    return success(
+        {
+            "recommendation_id": (
+                recommendation_id
+            ),
+            "action": payload.action,
+        }
+    )
 
 
 @router.post("/safi/advice")
