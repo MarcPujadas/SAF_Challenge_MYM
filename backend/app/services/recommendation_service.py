@@ -47,29 +47,10 @@ def build_message(
 ):
     if requested["occupancy_level"] == "unknown":
         return (
-            "No hi ha prou dades per estimar "
-            "l'ocupació d'aquesta franja."
+            "No tenim prou dades històriques d'aquesta franja "
+            "per fer una previsió fiable."
         )
 
-    if alternative is None:
-        return (
-            "No s'ha trobat una alternativa millor "
-            "amb les dades disponibles."
-        )
-
-    if (
-        alternative["occupancy_score"]
-        >= requested["occupancy_score"]
-    ):
-        return (
-            "No s'ha trobat una franja propera "
-            "amb menys ocupació."
-        )
-
-    reduction = (
-        requested["occupancy_score"]
-        - alternative["occupancy_score"]
-    )
     level_labels = {
         "low": "baixa",
         "medium": "mitjana",
@@ -78,14 +59,30 @@ def build_message(
         "unknown": "desconeguda",
     }
 
+    requested_level = level_labels[requested["occupancy_level"]]
+    requested_score = requested["occupancy_score"]
+    requested_start = requested["start_time"]
+
+    if alternative is None or (
+        alternative["occupancy_score"] >= requested_score
+    ):
+        if requested["occupancy_level"] == "low":
+            return (
+                f"És una bona franja: a les {requested_start} "
+                f"l'ocupació acostuma a ser baixa ({requested_score}/100)."
+            )
+
+        return (
+            f"A les {requested_start} l'ocupació acostuma a ser "
+            f"{requested_level} ({requested_score}/100). "
+            "No he trobat cap franja propera clarament millor."
+        )
+
     return (
-        f"SAFi et recomana les {alternative['start']}: "
-        f"ocupació habitual {level_labels[alternative['occupancy_level']]} "
-        f"({alternative['occupancy_score']}/100), davant de "
-        f"{level_labels[requested['occupancy_level']]} "
-        f"({requested['occupancy_score']}/100) a les "
-        f"{requested['start_time']}. "
-        f"Reducció estimada: {reduction} punts."
+        f"A les {requested_start} acostuma a haver-hi una ocupació "
+        f"{requested_level}. Si pots, et recomano les {alternative['start']}, "
+        f"que acostumen a estar més tranquil·les "
+        f"({alternative['occupancy_score']}/100 vs {requested_score}/100)."
     )
 
 
