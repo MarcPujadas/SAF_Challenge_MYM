@@ -24,6 +24,15 @@ const SUGGESTIONS = [
   'Tinc alguna reserva?',
 ];
 
+function plainText(text: string): string {
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^\s*[-*+]\s+/gm, '')
+    .trim();
+}
+
 export default function SafiChatScreen(_props: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -40,7 +49,10 @@ export default function SafiChatScreen(_props: Props) {
     setSending(true);
     try {
       const res = await chatSafi(text);
-      setMessages((prev) => [...prev, { id: nextId.current++, from: 'safi', text: res.message }]);
+      setMessages((prev) => [
+        ...prev,
+        { id: nextId.current++, from: 'safi', text: plainText(res.message) },
+      ]);
     } catch (err) {
       setError(errorMessage(err));
     }
