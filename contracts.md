@@ -454,6 +454,19 @@ Demana al backend una recomanació de franja basada en l'ocupació històrica.
 
 La recomanació queda registrada al backend perquè posteriorment es pugui saber si l'usuari l'ha acceptat o ignorat.
 
+Els espais amb `spaces.type == "court"` (pàdel, tennis, esquaix, futbol i altres pistes equivalents) no reben recomanacions SAFi d'ocupació. En aquests casos l'endpoint respon HTTP 200 amb:
+
+```json
+{
+  "recommendation_id": null,
+  "recommended_slot": null,
+  "recommendation_available": false,
+  "unavailable_reason": "unsupported_space_type"
+}
+```
+
+No es desa cap recomanació a SQLite. La disponibilitat i les reserves d'aquests espais continuen funcionant normalment.
+
 Per al MVP, l'usuari associat és:
 
 ```text
