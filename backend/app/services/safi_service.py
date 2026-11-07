@@ -6,8 +6,8 @@ from typing import Any
 from app.config.services import (
     SERVICE_SEARCH_PHRASES,
     SPACE_ID_BY_ALIAS,
+    supports_safi_recommendations,
 )
-from app.services.catalog_service import supports_safi_recommendations
 from app.services.historical_service import (
     get_historical_occupancy,
 )
