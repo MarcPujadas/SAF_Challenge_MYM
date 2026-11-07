@@ -259,25 +259,12 @@ del dataset original.
 
 Els recursos del SAF es normalitzen i es relacionen amb els `space_id` utilitzats pel nostre backend.
 
-Actualment s'han pogut relacionar de manera segura:
-
-```text
-81 de 118 recursos
-```
-
-Els recursos amb noms ambigus o que no es poden relacionar amb confiança es descarten en lloc d'inventar correspondències.
-
-El processament actual parteix aproximadament de:
-
-```text
-36.365 registres
-```
-
-i genera aproximadament:
-
-```text
-31.425 registres històrics normalitzats
-```
+El mapping reusable separa normalització de text, registry d'alias,
+jerarquia de recursos i estats `mapped`, `manual_review` i `ignored`.
+Els registres amb recursos ambigus es conserven a `historical_usage` com a
+`manual_review`; no es converteixen en scores fins que la relació es revisi.
+El registry documenta la correcció de Pàdel Pista 2 i els vuit carrils de la
+piscina de 25 m. No s'infereixen subdivisions de camps de futbol.
 
 El resultat local es guarda a:
 
@@ -285,7 +272,11 @@ El resultat local es guarda a:
 backend/data/processed/historical_occupancy.csv
 ```
 
-Aquest fitxer tampoc es publica al repositori.
+Aquest CSV manté les columnes antigues necessàries per les consultes per
+`space_id` i afegeix procedència i camps de traçabilitat per als recursos
+mapejats. Les files originals (incloses les pendents de revisió) s'importen
+separadament a SQLite; no s'elimina ni es modifica el XLSX font. Els CSV/XLSX
+locals no es publiquen al repositori.
 
 ---
 
@@ -304,6 +295,8 @@ users
 spaces
 services
 service_spaces
+data_sources
+historical_usage
 reservations
 ```
 
@@ -321,6 +314,17 @@ correspon. Pàdel Pista 2 es conserva com a recurs virtual si manca a SQLite,
 perquè apareix al mapping de l'històric normalitzat; no es modifica el fitxer
 font ni s'inventa capacitat de persones.
 
+`data_sources` registra els imports SAF (`saf_reserves_2026` i
+`saf_guided_activities_2026`) i les reserves operatives de l'aplicació
+(`app_live`). `historical_usage` conserva cada fila d'origen amb el seu
+checksum i número de fila, el nom raw, el volum de reserves, el mapping i el
+`capacity_mode`. La clau de deduplicació és
+`(source_id, source_checksum, source_record_key)`: reexecutar el mateix import
+actualitza les mateixes files, mentre que una nova versió del fitxer es manté
+com a versió històrica separada. `people_count`, `occupied_units` i
+`occupancy_ratio` queden nuls quan no es poden justificar amb la semàntica de
+la font. Les reserves de l'app continuen només a `reservations`.
+
 Per executar l'informe de qualitat del mapping des de `backend/`:
 
 ```powershell
@@ -329,7 +333,10 @@ python -m scripts.validate_service_spaces
 
 L'informe identifica mappings incomplets/invàlids, recursos duplicats,
 recursos de base de dades o històric sense mapping i el cas especial de Pàdel
-Pista 2. No forma part de l'arrencada de l'API.
+Pista 2. El script `python -m scripts.validate_data_integrity` també mostra
+la cobertura per files i volum, els recursos `manual_review` i els gates
+mínims de recursos. Aquests informes són per a revisió humana i no formen
+part de l'arrencada de l'API.
 
 ## Usuari de demostració
 

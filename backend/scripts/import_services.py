@@ -4,6 +4,9 @@ from app.database.database import (
 )
 from app.database.service_spaces import seed_service_spaces
 from app.config.services import services_for_database
+from app.services.catalog_service import (
+    get_historical_import_quality_report,
+)
 
 
 SERVICES = services_for_database()
@@ -68,6 +71,15 @@ def main():
             )
 
         seed_service_spaces(connection)
+
+    gates = get_historical_import_quality_report()["resource_gates"]
+    for service_id, gate in gates.items():
+        if not gate["passed"]:
+            print(
+                f"AVÍS: quality gate {service_id}: "
+                f"{gate['mapped_resources']}/"
+                f"{gate['minimum_expected']} recursos."
+            )
 
 
 if __name__ == "__main__":

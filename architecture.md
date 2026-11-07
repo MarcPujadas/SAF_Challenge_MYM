@@ -107,6 +107,7 @@ S'utilitza per guardar les dades creades per l'aplicació:
 - reserves,
 - espais,
 - serveis,
+- procedència i ús històric SAF,
 - configuració mínima.
 
 Les reserves de la demo són reserves reals dins del nostre sistema i queden persistides a SQLite.
@@ -118,6 +119,12 @@ respostes existents. El mapping és centralitzat a
 `backend/app/config/service_spaces.py`; la capacitat de persones no es confon
 amb la capacitat d'unitats reservables. Pàdel Pista 2 es pot marcar com a
 virtual quan falta a la taula `spaces`, sense modificar el dataset original.
+
+Les dades històriques importades es mantenen separades de les reserves
+operatives: `historical_usage` referencia `data_sources` i conserva el recurs
+raw, el mapping i el checksum de la font. Les files no classificades es
+conserven per a revisió; no es calculen counts de persones ni ocupació si la
+semàntica de les dades no ho permet.
 
 ### Dades i recomanador
 

@@ -9,6 +9,7 @@ from app.config.service_spaces import (
     SERVICE_SPACE_MAPPINGS,
     ResourceMapping,
 )
+from app.config.resource_mapping import documented_subdivisions
 from app.database.database import get_connection
 
 
@@ -386,6 +387,213 @@ def get_service_space_quality_report(
         ],
         "padel_pista_2": padel_pista_2,
         "issues": issues,
+    }
+
+
+def get_historical_import_quality_report() -> dict:
+    with closing(get_connection()) as connection:
+        historical_rows = connection.execute(
+            """
+            SELECT
+                usage.source_id,
+                usage.service_id,
+                usage.space_id,
+                usage.raw_resource_name,
+                usage.raw_reservation_count,
+                usage.mapping_status
+            FROM historical_usage AS usage
+            JOIN data_sources AS sources
+                ON sources.id = usage.source_id
+                AND sources.checksum = usage.source_checksum
+            """
+        ).fetchall()
+        services = connection.execute(
+            """
+            SELECT services.id
+            FROM services
+            LEFT JOIN service_spaces
+                ON service_spaces.service_id = services.id
+                AND service_spaces.is_active = 1
+            GROUP BY services.id
+            HAVING COUNT(service_spaces.space_id) = 0
+            ORDER BY services.id
+            """
+        ).fetchall()
+        spaces_without_service = connection.execute(
+            """
+            SELECT spaces.id
+            FROM spaces
+            LEFT JOIN service_spaces
+                ON service_spaces.space_id = spaces.id
+                AND service_spaces.is_active = 1
+            GROUP BY spaces.id
+            HAVING COUNT(service_spaces.service_id) = 0
+            ORDER BY spaces.id
+            """
+        ).fetchall()
+        service_links = connection.execute(
+            """
+            SELECT service_id, space_id, is_virtual
+            FROM service_spaces
+            WHERE is_active = 1
+            ORDER BY service_id, display_order, space_id
+            """
+        ).fetchall()
+        mapped_history_spaces = connection.execute(
+            """
+            SELECT DISTINCT space_id
+            FROM historical_usage AS usage
+            JOIN data_sources AS sources
+                ON sources.id = usage.source_id
+                AND sources.checksum = usage.source_checksum
+            WHERE usage.mapping_status = 'mapped'
+                AND usage.space_id IS NOT NULL
+            """
+        ).fetchall()
+
+    raw_rows = len(historical_rows)
+    raw_volume = sum(
+        float(row["raw_reservation_count"])
+        for row in historical_rows
+        if row["raw_reservation_count"] is not None
+    )
+    mapped_rows = [
+        row for row in historical_rows
+        if row["mapping_status"] == "mapped"
+    ]
+    mapped_volume = sum(
+        float(row["raw_reservation_count"])
+        for row in mapped_rows
+        if row["raw_reservation_count"] is not None
+    )
+    raw_resources = {
+        row["raw_resource_name"]
+        for row in historical_rows
+        if row["raw_resource_name"]
+    }
+    resources_by_status = {
+        status: {
+            row["raw_resource_name"]
+            for row in historical_rows
+            if row["mapping_status"] == status
+            and row["raw_resource_name"]
+        }
+        for status in ("mapped", "manual_review", "ignored")
+    }
+    historical_space_ids = {
+        row["space_id"]
+        for row in mapped_history_spaces
+        if row["space_id"]
+    }
+    links_by_service: dict[str, set[str]] = {}
+    physical_links_by_service: dict[str, set[str]] = {}
+    for row in service_links:
+        links_by_service.setdefault(row["service_id"], set()).add(
+            row["space_id"]
+        )
+        if not row["is_virtual"]:
+            physical_links_by_service.setdefault(row["service_id"], set()).add(
+                row["space_id"]
+            )
+    raw_resources_by_service = {
+        service_id: {
+            row["raw_resource_name"]
+            for row in mapped_rows
+            if row["service_id"] == service_id
+            and row["raw_resource_name"]
+        }
+        for service_id in {
+            row["service_id"] for row in mapped_rows if row["service_id"]
+        }
+    }
+
+    expected_by_service: dict[str, set[str]] = {}
+    for mapping in SERVICE_SPACE_MAPPINGS:
+        expected_by_service.setdefault(mapping.service_id, set()).add(
+            mapping.space_id
+        )
+    service_summary = {}
+    for service_id, expected_spaces in expected_by_service.items():
+        mapped_spaces = links_by_service.get(service_id, set())
+        service_summary[service_id] = {
+            "mapped_resources": len(mapped_spaces),
+            "expected_resources": len(expected_spaces),
+            "historical_resources": len(
+                mapped_spaces & historical_space_ids
+            ),
+        }
+    service_summary["football"]["physical_fields"] = len(
+        physical_links_by_service.get("football", set())
+        & expected_by_service["football"]
+    )
+    service_summary["football"]["documented_subdivisions"] = (
+        documented_subdivisions()
+    )
+    service_summary["guided-activities"]["classified_locations"] = len(
+        raw_resources_by_service.get("guided-activities", set())
+    )
+
+    expected_minimums = {
+        "tennis": 5,
+        "padel": 4,
+        "pool-25m": 8,
+        "squash": 3,
+        "football": 4,
+    }
+    gates = {
+        service_id: {
+            "mapped_resources": len(links_by_service.get(service_id, set())),
+            "minimum_expected": minimum,
+            "passed": len(links_by_service.get(service_id, set())) >= minimum,
+        }
+        for service_id, minimum in expected_minimums.items()
+    }
+    known_volume_rows = [
+        row
+        for row in historical_rows
+        if row["raw_reservation_count"] is not None
+    ]
+    coverage_by_rows = (
+        round(len(mapped_rows) / raw_rows * 100, 2)
+        if raw_rows
+        else None
+    )
+    coverage_by_volume = (
+        round(mapped_volume / raw_volume * 100, 2)
+        if raw_volume
+        else None
+    )
+    all_mapped_spaces = {
+        row["space_id"]
+        for row in service_links
+        if row["space_id"] and not row["is_virtual"]
+    }
+    return {
+        "raw_rows": raw_rows,
+        "raw_reservation_volume": raw_volume,
+        "rows_with_known_reservation_volume": len(known_volume_rows),
+        "unique_raw_resources": len(raw_resources),
+        "mapped_resources": len(resources_by_status["mapped"]),
+        "manual_review_resources": sorted(
+            resources_by_status["manual_review"]
+        ),
+        "manual_review_resource_count": len(
+            resources_by_status["manual_review"]
+        ),
+        "ignored_resources": sorted(resources_by_status["ignored"]),
+        "ignored_resource_count": len(resources_by_status["ignored"]),
+        "mapped_reservation_volume": mapped_volume,
+        "coverage_by_rows_percentage": coverage_by_rows,
+        "coverage_by_reservation_volume_percentage": coverage_by_volume,
+        "spaces_without_historical": sorted(
+            all_mapped_spaces - historical_space_ids
+        ),
+        "services_without_spaces": [row["id"] for row in services],
+        "spaces_without_service": [
+            row["id"] for row in spaces_without_service
+        ],
+        "service_summary": service_summary,
+        "resource_gates": gates,
     }
 
 

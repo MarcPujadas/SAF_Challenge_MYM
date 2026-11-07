@@ -69,6 +69,49 @@ def init_db() -> None:
                 )
             );
 
+            CREATE TABLE IF NOT EXISTS data_sources (
+                id TEXT PRIMARY KEY,
+                source_type TEXT NOT NULL,
+                label TEXT NOT NULL,
+                period_from TEXT,
+                period_to TEXT,
+                imported_at TEXT,
+                checksum TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS historical_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_id TEXT NOT NULL,
+                source_checksum TEXT NOT NULL,
+                source_record_key TEXT NOT NULL,
+                service_id TEXT,
+                space_id TEXT,
+                date TEXT,
+                weekday INTEGER,
+                start_time TEXT,
+                end_time TEXT,
+                raw_reservation_count REAL,
+                raw_reservation_value TEXT,
+                people_count REAL,
+                occupied_units REAL,
+                capacity_people_snapshot REAL,
+                capacity_units_snapshot REAL,
+                occupancy_ratio REAL,
+                raw_resource_name TEXT,
+                capacity_mode TEXT NOT NULL DEFAULT 'unknown' CHECK (
+                    capacity_mode IN ('people', 'resource_units', 'unknown')
+                ),
+                mapping_status TEXT NOT NULL CHECK (
+                    mapping_status IN ('mapped', 'manual_review', 'ignored')
+                ),
+                capacity_share REAL DEFAULT 1.0 CHECK (
+                    capacity_share IS NULL OR capacity_share > 0
+                ),
+                imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(source_id, source_checksum, source_record_key),
+                FOREIGN KEY (source_id) REFERENCES data_sources(id)
+            );
+
             CREATE TRIGGER IF NOT EXISTS
             service_spaces_require_existing_physical_space_insert
             BEFORE INSERT ON service_spaces
@@ -93,6 +136,12 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_service_spaces_space_active
             ON service_spaces(space_id, is_active);
+
+            CREATE INDEX IF NOT EXISTS idx_historical_usage_current_lookup
+            ON historical_usage(source_id, source_checksum, service_id, date);
+
+            CREATE INDEX IF NOT EXISTS idx_historical_usage_resource_date
+            ON historical_usage(space_id, date, start_time, mapping_status);
 
             CREATE TABLE IF NOT EXISTS reservations (
                 id TEXT PRIMARY KEY,
@@ -155,5 +204,40 @@ def init_db() -> None:
         connection.execute(
             "INSERT OR IGNORE INTO users (id, name) VALUES (?, ?)",
             ("demo-user", "Usuari Demo"),
+        )
+        connection.executemany(
+            """
+            INSERT OR IGNORE INTO data_sources (
+                id, source_type, label, imported_at
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            [
+                (
+                    "saf_reserves_2026",
+                    "saf_historical",
+                    "SAF reserves 2026",
+                    None,
+                ),
+                (
+                    "saf_guided_activities_2026",
+                    "saf_historical",
+                    "SAF guided activities 2026",
+                    None,
+                ),
+            ],
+        )
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO data_sources (
+                id, source_type, label, imported_at
+            )
+            VALUES (
+                'app_live',
+                'application_operational',
+                'SAF Hack app reservations',
+                CURRENT_TIMESTAMP
+            )
+            """
         )
         seed_service_spaces(connection)

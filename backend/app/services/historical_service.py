@@ -5,6 +5,7 @@ import pandas as pd
 
 from app.config.services import SPACE_ID_BY_SERVICE_ID
 from app.config.schedules import STANDARD_75_MINUTE_SLOTS
+from app.config.service_spaces import SPACE_IDS_BY_SERVICE_ID
 from app.services.schedule_service import time_to_minutes
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -93,6 +94,160 @@ def prepare_space_data(space_id, weekday):
     ].copy()
 
     return space_data
+
+
+def prepare_service_data(service_id, weekday=None):
+    """Return mapped historical rows without combining physical resources."""
+    if service_id not in SPACE_IDS_BY_SERVICE_ID:
+        raise ValueError(f"Unknown service_id: {service_id}")
+
+    df = load_historical_data()
+    if df.empty:
+        return df.copy()
+    service_data = df[
+        df["space_id"].isin(SPACE_IDS_BY_SERVICE_ID[service_id])
+    ].copy()
+    if "mapping_status" in service_data.columns:
+        service_data = service_data[
+            service_data["mapping_status"] == "mapped"
+        ].copy()
+    if weekday is not None:
+        if "weekday" in service_data.columns:
+            service_data = service_data[
+                service_data["weekday"].astype(int) == int(weekday)
+            ].copy()
+        else:
+            service_data = service_data[
+                service_data["date"].map(
+                    lambda value: date_type.fromisoformat(str(value)).weekday()
+                )
+                == int(weekday)
+            ].copy()
+    service_data["service_id"] = service_id
+    return service_data.reset_index(drop=True)
+
+
+def _service_resource_ids(service_id, space_id=None):
+    if service_id not in SPACE_IDS_BY_SERVICE_ID:
+        raise ValueError(f"Unknown service_id: {service_id}")
+    resource_ids = SPACE_IDS_BY_SERVICE_ID[service_id]
+    if space_id is not None:
+        if space_id not in resource_ids:
+            raise ValueError(
+                f"Space {space_id!r} is not mapped to {service_id!r}."
+            )
+        return (space_id,)
+    return resource_ids
+
+
+def get_service_historical_occupancy(
+    service_id,
+    weekday,
+    start_time,
+    *,
+    space_id=None,
+):
+    """Return per-resource scores; never combine unlike physical resources."""
+    resources = [
+        get_historical_occupancy(resource_id, weekday, start_time)
+        for resource_id in _service_resource_ids(service_id, space_id)
+    ]
+    return {
+        "service_id": service_id,
+        "aggregate": False,
+        "resources": resources,
+    }
+
+
+def get_service_historical_heatmap(
+    service_id,
+    date_from=None,
+    date_to=None,
+    *,
+    space_id=None,
+):
+    """Return a separate heatmap for each mapped resource."""
+    resources = []
+    for resource_id in _service_resource_ids(service_id, space_id):
+        resources.append(
+            {
+                "space_id": resource_id,
+                "days": get_historical_heatmap(
+                    date_from=date_from,
+                    date_to=date_to,
+                    space_id=resource_id,
+                ),
+            }
+        )
+    return {
+        "service_id": service_id,
+        "aggregate": False,
+        "resources": resources,
+    }
+
+
+def get_service_best_alternative(
+    service_id,
+    weekday,
+    preferred_start,
+    *,
+    space_id=None,
+):
+    """Find alternatives independently per resource; no service-wide ranking."""
+    return {
+        "service_id": service_id,
+        "aggregate": False,
+        "resources": [
+            {
+                "space_id": resource_id,
+                "alternative": get_best_alternative(
+                    resource_id,
+                    weekday,
+                    preferred_start,
+                ),
+            }
+            for resource_id in _service_resource_ids(service_id, space_id)
+        ],
+    }
+
+
+def get_service_quietest_slot(
+    service_id,
+    weekday,
+    *,
+    space_id=None,
+):
+    """Return each resource's quietest observed slot without cross-resource sums."""
+    results = []
+    for resource_id in _service_resource_ids(service_id, space_id):
+        resource_data = prepare_space_data(resource_id, weekday)
+        if resource_data.empty:
+            quietest = None
+        else:
+            statistics = calculate_slot_statistics(resource_data)
+            statistics = add_occupancy_scores(statistics)
+            row = statistics.sort_values(
+                ["occupancy_score", "start_time"]
+            ).iloc[0]
+            quietest = {
+                "start": row["start_time"],
+                "occupancy_score": int(row["occupancy_score"]),
+                "occupancy_level": occupancy_level(
+                    int(row["occupancy_score"])
+                ),
+                "samples": int(row["samples"]),
+            }
+        results.append(
+            {
+                "space_id": resource_id,
+                "slot": quietest,
+            }
+        )
+    return {
+        "service_id": service_id,
+        "aggregate": False,
+        "resources": results,
+    }
 
 
 def calculate_slot_statistics(space_data):

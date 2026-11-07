@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 import re
 import unicodedata
@@ -9,6 +10,7 @@ from app.database.database import (
     init_db,
 )
 from app.database.service_spaces import seed_service_spaces
+from app.database.historical_usage import register_data_source
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -149,30 +151,14 @@ def main():
             )
         )
 
-    duplicates = df[
-        df.duplicated()
-    ]
-
-    if not duplicates.empty:
-        print(
-            "DUPLICATS DETECTATS:"
-        )
-
-        print(
-            duplicates.to_string(
-                index=False
-            )
-        )
-
-        print()
-
-    df = df.drop_duplicates()
-
+    checksum = hashlib.sha256(DATA_PATH.read_bytes()).hexdigest()
     imported = 0
+    seen_rows = {}
+    duplicate_rows = 0
 
     with get_connection() as connection:
 
-        for _, row in df.iterrows():
+        for row_number, (_, row) in enumerate(df.iterrows(), start=2):
 
             espai = str(
                 row["Espai"]
@@ -206,6 +192,22 @@ def main():
             space_type = get_space_type(
                 espai
             )
+
+            definition = (name, space_type, capacity)
+            if space_id in seen_rows:
+                if seen_rows[space_id] != definition:
+                    raise ValueError(
+                        "Conflicting source rows resolve to the same "
+                        f"space_id {space_id!r}; row {row_number} needs "
+                        "manual review."
+                    )
+                duplicate_rows += 1
+                print(
+                    f"Fila duplicada {row_number}: {space_id} "
+                    "(se conserva en el dataset original; una entidad SQLite)"
+                )
+                continue
+            seen_rows[space_id] = definition
 
             connection.execute(
                 """
@@ -242,12 +244,22 @@ def main():
             )
 
         seed_service_spaces(connection)
+        register_data_source(
+            connection,
+            source_id="saf_spaces_2026",
+            source_type="saf_catalog",
+            label="SAF spaces 2026",
+            period_from=None,
+            period_to=None,
+            checksum=checksum,
+        )
 
     print()
 
     print(
         f"Importació completada: "
-        f"{imported} espais."
+        f"{imported} espais únics, {duplicate_rows} files duplicades "
+        "identificades."
     )
 
 
