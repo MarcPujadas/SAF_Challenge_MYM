@@ -129,6 +129,11 @@ Retorna els espais disponibles.
 ## GET /services
 
 Retorna els serveis que es mostren a l'aplicació.
+La resposta inclou els vuit serveis configurats pel backend:
+`fitness`, `pool-25m`, `pool-16m`, `padel`, `tennis`, `squash`,
+`football` i `guided-activities`. Cada servei té un `id` únic i un
+`space_id` que identifica un espai existent. `reservable` és `true`
+només quan el servei i l'espai associat són reservables.
 
 ### Response
 
@@ -151,10 +156,45 @@ Retorna els serveis que es mostren a l'aplicació.
       "reservable": true
     },
     {
+      "id": "pool-16m",
+      "name": "Piscina 16 m",
+      "description": "Piscina de 16 metres",
+      "space_id": "piscina-de-16-metres",
+      "reservable": true
+    },
+    {
       "id": "padel",
       "name": "Pàdel",
       "description": "Pistes de pàdel",
       "space_id": "pistes-de-padel-pista-1",
+      "reservable": true
+    },
+    {
+      "id": "tennis",
+      "name": "Tennis",
+      "description": "Pistes de tennis",
+      "space_id": "tennis-tennis-1",
+      "reservable": true
+    },
+    {
+      "id": "squash",
+      "name": "Esquaix",
+      "description": "Pistes d'esquaix",
+      "space_id": "esquaix-esquaix-2",
+      "reservable": true
+    },
+    {
+      "id": "football",
+      "name": "Futbol",
+      "description": "Camps de futbol",
+      "space_id": "futbol-7-camp-1",
+      "reservable": true
+    },
+    {
+      "id": "guided-activities",
+      "name": "Activitats dirigides",
+      "description": "Sales d'activitats dirigides",
+      "space_id": "sales-activitats-dirigides-sala-1",
       "reservable": true
     }
   ],
@@ -237,10 +277,69 @@ Quan no existeixen dades suficients:
 }
 ```
 
+`available` i `remaining_capacity` representen disponibilitat actual
+calculada des de SQLite, les reserves confirmades i la capacitat de
+l'espai. `occupancy_score` i `occupancy_level` són una previsió basada
+en l'històric processat; no determinen la disponibilitat de reserva.
+
 ### Errors possibles
 
 ```text
 INVALID_DATE
+INVALID_SPACE
+```
+
+## GET /availability/week
+
+Consulta la disponibilitat actual de totes les franges vàlides dels dies
+inclosos, ambdós inclusivament. Només utilitza espais, capacitat i
+reserves confirmades de SQLite; no inclou cap mètrica històrica.
+
+### Query parameters
+
+```text
+space_id=tennis-tennis-1
+from=2026-11-09
+to=2026-11-15
+```
+
+### Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "space_id": "tennis-tennis-1",
+    "from": "2026-11-09",
+    "to": "2026-11-15",
+    "days": [
+      {
+        "date": "2026-11-09",
+        "slots": [
+          {
+            "start": "07:15",
+            "end": "08:30",
+            "available": true,
+            "remaining_capacity": 1
+          }
+        ]
+      }
+    ]
+  },
+  "error": null
+}
+```
+
+Cada dia inclou totes les franges vàlides encara que no hi hagi reserves.
+Una franja sense reserves retorna la capacitat completa de l'espai.
+Les franges completes retornen `available: false` i
+`remaining_capacity: 0`.
+
+### Errors possibles
+
+```text
+INVALID_DATE
+INVALID_DATE_RANGE
 INVALID_SPACE
 ```
 
@@ -260,7 +359,19 @@ from=2026-04-01
 to=2026-04-30
 ```
 
-Els filtres permeten limitar les dades per espai i període.
+Els filtres permeten limitar les dades per espai i període. `from` i
+`to` són inclusius; si s'omet un dels dos, es consulta només la data
+indicada. Si s'ometen tots dos, es retornen les dates disponibles a
+l'històric. La resposta inclou tots els dies del rang.
+
+Fitness utilitza les seves franges conegudes. Per als altres espais només
+es retornen franges presents en el seu històric, incloses les franges
+vàlides que no tinguin una mostra per al dia consultat. En aquest últim
+cas, `occupancy_score` és `null` i `occupancy_level` és `"unknown"`.
+Cada valor es basa en mostres històriques comparables del mateix dia de
+la setmana, espai i hora, no en reserves creades per l'aplicació per a la
+data futura consultada. Si s'omet `space_id`, el score d'una hora
+combina els espais amb mostres disponibles per a aquell dia de la setmana.
 
 ### Response
 
@@ -293,14 +404,27 @@ Els filtres permeten limitar les dades per espai i període.
 
 ### Sense dades
 
-Si no existeixen dades per als filtres sol·licitats:
+Si no hi ha espais ni franges conegudes en l'històric, es retornen tots
+els dies demanats amb `slots: []`. Les franges conegudes sense mostres
+per a un dia es retornen amb score `null` i nivell `"unknown"`.
 
 ```json
 {
   "success": true,
   "data": {
     "space_id": "sala-fitnes-sala-cardio",
-    "days": []
+    "days": [
+      {
+        "date": "2026-11-10",
+        "slots": [
+          {
+            "hour": "18:30",
+            "occupancy_score": null,
+            "occupancy_level": "unknown"
+          }
+        ]
+      }
+    ]
   },
   "error": null
 }
@@ -518,6 +642,10 @@ RESERVATION_CONFLICT
 ```text
 user_id=demo-user
 ```
+
+Només retorna reserves amb `status: "confirmed"`. Les cancel·lades es
+conserven al sistema amb `status: "cancelled"` però no formen part de la
+llista de reserves actives.
 
 ### Response
 

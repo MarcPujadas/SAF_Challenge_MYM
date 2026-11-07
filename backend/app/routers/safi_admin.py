@@ -8,9 +8,9 @@ from pydantic import BaseModel
 from app.common import ApiError, success
 from app.database.database import get_connection
 from app.services.historical_service import (
+    get_historical_heatmap,
     get_historical_occupancy_by_date,
     get_historical_occupancy_by_hour,
-    occupancy_level,
 )
 from app.services.recommendation_service import recommend
 from app.services.safi_service import advice, chat
@@ -225,38 +225,11 @@ def get_availability_heatmap(
     date_to: str | None = Query(default=None, alias="to"),
 ) -> dict[str, Any]:
     start, end = parse_date_range(date_from, date_to)
-    records = get_historical_occupancy_by_date(
+    days = get_historical_heatmap(
         date_from=start,
         date_to=end,
         space_id=space_id,
     )
-    days = []
-    if not records.empty:
-        daily_slots = (
-            records.groupby(
-                ["date", "start_time"],
-                as_index=False,
-            )["occupancy_score"]
-            .mean()
-        )
-        for day, slots_data in daily_slots.groupby("date", sort=True):
-            slots = []
-            for row in slots_data.sort_values("start_time").itertuples():
-                score = int(round(row.occupancy_score))
-                slots.append(
-                    {
-                        "hour": row.start_time,
-                        "occupancy_score": score,
-                        "occupancy_level": occupancy_level(score),
-                    }
-                )
-            days.append(
-                {
-                    "date": day,
-                    "slots": slots,
-                }
-            )
-
     return success(
         {
             "space_id": space_id,

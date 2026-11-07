@@ -1,18 +1,57 @@
 import re
+import unicodedata
 from datetime import date, timedelta
 from typing import Any
 
 from app.services.historical_service import (
-    add_occupancy_scores,
-    calculate_slot_statistics,
     get_historical_occupancy,
-    prepare_space_data,
 )
-from app.services.recommendation_service import recommend
+from app.services.recommendation_service import (
+    get_best_day_alternative,
+    get_quietest_slot,
+    recommend,
+)
 from app.services.validation import WEEKDAYS_CA, validate_date_time
 
 UNKNOWN_MESSAGE = "No ho sé amb les dades disponibles."
-SPACE_ALIASES = {"fitness": "sala-fitnes-sala-cardio"}
+SPACE_ALIASES = {
+    "fitness": "sala-fitnes-sala-cardio",
+    "pool-25m": "piscina-25-metres-carrer-1",
+    "pool-16m": "piscina-de-16-metres",
+    "padel": "pistes-de-padel-pista-1",
+    "tennis": "tennis-tennis-1",
+    "squash": "esquaix-esquaix-2",
+    "football": "futbol-7-camp-1",
+    "guided-activities": "sales-activitats-dirigides-sala-1",
+}
+SERVICE_PHRASES = [
+    ("activitats dirigides", "guided-activities"),
+    ("activitat dirigida", "guided-activities"),
+    ("guided activities", "guided-activities"),
+    ("clases dirigidas", "guided-activities"),
+    ("clase dirigida", "guided-activities"),
+    ("piscina de 16", "pool-16m"),
+    ("pool de 16", "pool-16m"),
+    ("piscina de 25", "pool-25m"),
+    ("pool de 25", "pool-25m"),
+    ("pool 16", "pool-16m"),
+    ("piscina 16", "pool-16m"),
+    ("pool 25", "pool-25m"),
+    ("piscina 25", "pool-25m"),
+    ("esquaix", "squash"),
+    ("squash", "squash"),
+    ("futbol", "football"),
+    ("football", "football"),
+    ("padel", "padel"),
+    ("tennis", "tennis"),
+    ("tenis", "tennis"),
+    ("fitness", "fitness"),
+    ("fitnes", "fitness"),
+    ("pool", "pool-25m"),
+    ("piscina", "pool-25m"),
+    ("swimming pool", "pool-25m"),
+    ("natacio", "pool-25m"),
+]
 LEVEL_CA = {
     "low": "baixa",
     "medium": "mitjana",
@@ -21,19 +60,68 @@ LEVEL_CA = {
 }
 
 
-def quietest_slot(space_id: str, weekday: int) -> tuple[str, int] | None:
-    statistics = add_occupancy_scores(
-        calculate_slot_statistics(
-            prepare_space_data(space_id, weekday)
-        )
+def normalize_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value.casefold())
+    return "".join(
+        character
+        for character in normalized
+        if not unicodedata.combining(character)
     )
-    if statistics.empty:
-        return None
 
-    row = statistics.sort_values(
-        ["occupancy_score", "start_time"]
-    ).iloc[0]
-    return row["start_time"], int(row["occupancy_score"])
+
+def detect_space_id(message: str) -> str | None:
+    normalized = normalize_text(message)
+    for phrase, service_id in SERVICE_PHRASES:
+        if phrase in normalized:
+            return SPACE_ALIASES[service_id]
+    return None
+
+
+def parse_date_reference(message: str) -> tuple[date, bool] | None:
+    normalized = normalize_text(message)
+    explicit_date = re.search(r"\b\d{4}-\d{2}-\d{2}\b", normalized)
+    if explicit_date is not None:
+        try:
+            parsed_date = date.fromisoformat(explicit_date.group())
+        except ValueError:
+            return None
+        if parsed_date.isoformat() != explicit_date.group():
+            return None
+        return parsed_date, True
+
+    today = date.today()
+    if any(word in normalized for word in ("demà", "dema", "tomorrow", "manana")):
+        return today + timedelta(days=1), True
+    if any(word in normalized for word in ("avui", "today", "hoy")):
+        return today, True
+
+    weekday_aliases = {
+        "dilluns": 0,
+        "lunes": 0,
+        "monday": 0,
+        "dimarts": 1,
+        "martes": 1,
+        "tuesday": 1,
+        "dimecres": 2,
+        "miercoles": 2,
+        "wednesday": 2,
+        "dijous": 3,
+        "jueves": 3,
+        "thursday": 3,
+        "divendres": 4,
+        "viernes": 4,
+        "friday": 4,
+        "dissabte": 5,
+        "sabado": 5,
+        "saturday": 5,
+        "diumenge": 6,
+        "domingo": 6,
+        "sunday": 6,
+    }
+    for day_name, weekday in weekday_aliases.items():
+        if re.search(rf"\b{day_name}\b", normalized):
+            return today + timedelta(days=(weekday - today.weekday()) % 7), True
+    return today, False
 
 
 def has_better_alternative(
@@ -142,10 +230,28 @@ def advice(space_id: str, date_value: str, start: str) -> dict[str, Any]:
 
 
 def chat(message: str) -> dict[str, Any]:
-    normalized = message.casefold()
-    if "fitness" not in normalized or not any(
+    normalized = normalize_text(message)
+    space_id = detect_space_id(message)
+    if space_id is None or not any(
         word in normalized
-        for word in ("ocup", "gent", "menys", "recoman", "hour", "when", "quan")
+        for word in (
+            "ocup",
+            "gent",
+            "gente",
+            "people",
+            "menys",
+            "menos",
+            "tranquil",
+            "quiet",
+            "recoman",
+            "recommend",
+            "hour",
+            "hora",
+            "when",
+            "quan",
+            "cuando",
+            "busy",
+        )
     ):
         return {
             "message": UNKNOWN_MESSAGE,
@@ -153,23 +259,20 @@ def chat(message: str) -> dict[str, Any]:
             "can_answer": False,
         }
 
-    space_id = SPACE_ALIASES["fitness"]
-    date_reference = date.today()
-    if "demà" in normalized or "dema" in normalized or "tomorrow" in normalized:
-        date_reference += timedelta(days=1)
-    elif "avui" not in normalized and "today" not in normalized:
-        explicit_date = re.search(r"\b\d{4}-\d{2}-\d{2}\b", message)
-        if explicit_date is not None:
-            try:
-                date_reference = date.fromisoformat(explicit_date.group())
-            except ValueError:
-                return {
-                    "message": UNKNOWN_MESSAGE,
-                    "sources": [],
-                    "can_answer": False,
-                }
+    parsed_reference = parse_date_reference(message)
+    if parsed_reference is None:
+        return {
+            "message": UNKNOWN_MESSAGE,
+            "sources": [],
+            "can_answer": False,
+        }
+    date_reference, has_explicit_day = parsed_reference
 
-    requested_time = re.search(r"\b(?:[01]?\d|2[0-3]):[0-5]\d\b", message)
+    requested_time = re.search(
+        r"\b\d{1,2}:\d{2}\b",
+        normalized,
+    )
+    source_weekday = date_reference.weekday()
     if requested_time is not None:
         start = requested_time.group().zfill(5)
         try:
@@ -218,19 +321,67 @@ def chat(message: str) -> dict[str, Any]:
                 "sources": [],
                 "can_answer": False,
             }
+        asks_for_other_day = any(
+            phrase in normalized
+            for phrase in (
+                "altre dia",
+                "altre jorn",
+                "otro dia",
+                "another day",
+                "other day",
+            )
+        )
+        if asks_for_other_day:
+            day_alternative = get_best_day_alternative(
+                space_id,
+                date_reference.isoformat(),
+                recommendation["requested_slot"]["start"],
+            )
+            if day_alternative is not None:
+                response_message += (
+                    f" Un altre dia amb menys ocupació és el "
+                    f"{day_alternative['date']} a les "
+                    f"{day_alternative['start']}."
+                )
     else:
-        quietest = quietest_slot(space_id, date_reference.weekday())
+        quietest = get_quietest_slot(
+            space_id,
+            date_reference.weekday() if has_explicit_day else None,
+        )
         if quietest is None:
             return {
                 "message": UNKNOWN_MESSAGE,
                 "sources": [],
                 "can_answer": False,
             }
-        quietest_start, _ = quietest
+        quietest_start = quietest["start"]
+        weekday = quietest["weekday"]
+        source_weekday = weekday
         response_message = (
-            f"Les {quietest_start} acostumen a ser una de les franges "
-            "amb menys ocupació."
+            f"Les {quietest_start} de {WEEKDAYS_CA[weekday]} acostumen "
+            "a ser una de les franges amb menys ocupació."
         )
+        if any(
+            phrase in normalized
+            for phrase in (
+                "altre dia",
+                "altre jorn",
+                "otro dia",
+                "another day",
+                "other day",
+            )
+        ):
+            day_alternative = get_best_day_alternative(
+                space_id,
+                date_reference.isoformat(),
+                quietest_start,
+            )
+            if day_alternative is not None:
+                response_message += (
+                    f" Un altre dia amb menys ocupació és el "
+                    f"{day_alternative['date']} a les "
+                    f"{day_alternative['start']}."
+                )
 
     return {
         "message": response_message,
@@ -238,7 +389,7 @@ def chat(message: str) -> dict[str, Any]:
             {
                 "type": "historical_occupancy",
                 "space_id": space_id,
-                "date_reference": WEEKDAYS_CA[date_reference.weekday()],
+                "date_reference": WEEKDAYS_CA[source_weekday],
             }
         ],
         "can_answer": True,

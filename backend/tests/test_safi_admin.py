@@ -1,17 +1,20 @@
 from unittest.mock import patch
 
 import pandas as pd
+import pytest
 from fastapi.testclient import TestClient
 
 from app import main
 from app.database import database
 from app.routers import safi_admin
 from app.services import historical_service
+from app.services import recommendation_service
 from app.services import safi_service
 
 
 FITNESS_SPACE_ID = "sala-fitnes-sala-cardio"
 TENNIS_SPACE_ID = "tennis-tennis-1"
+POOL_SPACE_ID = "piscina-25-metres-carrer-1"
 
 
 def make_client(tmp_path, monkeypatch):
@@ -369,6 +372,134 @@ def test_historical_occupancy_by_date_filters_and_scores_per_space_weekday(
     assert monday_busy["occupancy_level"] == "very_high"
 
 
+def test_best_day_alternative_requires_lower_occupancy_at_same_hour(
+    monkeypatch,
+):
+    records = pd.DataFrame(
+        [
+            (FITNESS_SPACE_ID, "2026-04-06", 0, "08:30", 10),
+            (FITNESS_SPACE_ID, "2026-04-06", 0, "18:30", 100),
+            (FITNESS_SPACE_ID, "2026-04-07", 1, "08:30", 90),
+            (FITNESS_SPACE_ID, "2026-04-07", 1, "18:30", 5),
+        ],
+        columns=historical_records().columns,
+    )
+    monkeypatch.setattr(
+        historical_service,
+        "load_historical_data",
+        lambda: records,
+    )
+
+    alternative = recommendation_service.get_best_day_alternative(
+        FITNESS_SPACE_ID,
+        "2026-04-06",
+        "18:30",
+    )
+
+    assert alternative == {
+        "date": "2026-04-07",
+        "start": "18:30",
+        "occupancy_score": 6,
+        "occupancy_level": "low",
+    }
+
+
+def test_best_day_alternative_returns_none_without_better_day_or_data(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        historical_service,
+        "load_historical_data",
+        historical_records,
+    )
+    assert recommendation_service.get_best_day_alternative(
+        FITNESS_SPACE_ID,
+        "2026-04-06",
+        "18:30",
+    ) is None
+
+    monkeypatch.setattr(
+        historical_service,
+        "load_historical_data",
+        empty_historical_records,
+    )
+    assert recommendation_service.get_best_day_alternative(
+        FITNESS_SPACE_ID,
+        "2026-04-06",
+        "18:30",
+    ) is None
+
+
+@pytest.mark.parametrize(
+    ("phrase", "expected_space_id"),
+    [
+        ("fitness", FITNESS_SPACE_ID),
+        ("piscina de 25 m", POOL_SPACE_ID),
+        ("piscina de 16 m", "piscina-de-16-metres"),
+        ("pàdel", "pistes-de-padel-pista-1"),
+        ("tennis", TENNIS_SPACE_ID),
+        ("esquaix", "esquaix-esquaix-2"),
+        ("futbol", "futbol-7-camp-1"),
+        ("activitats dirigides", "sales-activitats-dirigides-sala-1"),
+    ],
+)
+def test_safi_chat_answers_supported_services_and_detects_weekday_time(
+    phrase,
+    expected_space_id,
+):
+    recommendation = {
+        "requested_slot": {
+            "start": "09:00",
+            "occupancy_score": 72,
+            "occupancy_level": "high",
+        },
+        "recommended_slot": None,
+    }
+    with (
+        patch.object(
+            safi_service,
+            "recommend",
+            return_value=recommendation,
+        ) as recommend,
+        patch.object(
+            safi_service,
+            "get_historical_occupancy",
+            return_value={"samples": 12},
+        ),
+    ):
+        result = safi_service.chat(
+            f"Quan hi ha menys ocupació al {phrase} dimarts a les 9:00?"
+        )
+
+    assert result["can_answer"] is True
+    assert result["sources"][0]["space_id"] == expected_space_id
+    assert result["sources"][0]["date_reference"] == "dimarts"
+    assert recommend.call_args.args[0] == expected_space_id
+    assert recommend.call_args.args[2] == "09:00"
+
+
+def test_safi_chat_returns_unknown_when_supported_service_has_no_data():
+    with patch.object(
+        safi_service,
+        "recommend",
+        return_value={
+            "requested_slot": {
+                "start": None,
+                "occupancy_score": None,
+                "occupancy_level": "unknown",
+            },
+            "recommended_slot": None,
+        },
+    ):
+        result = safi_service.chat(
+            "Quan hi ha menys ocupació a la piscina el dimarts a les 9:00?"
+        )
+
+    assert result["can_answer"] is False
+    assert result["message"] == safi_service.UNKNOWN_MESSAGE
+    assert result["sources"] == []
+
+
 def test_heatmap_returns_contract_shape_and_applies_filters(
     tmp_path, monkeypatch
 ):
@@ -407,20 +538,25 @@ def test_heatmap_returns_contract_shape_and_applies_filters(
         for slot in day["slots"]
     )
     assert {
-        slot["hour"] for day in days for slot in day["slots"]
-    } == {"08:30", "18:30"}
+        slot["hour"] for slot in days[0]["slots"]
+    } == set(historical_service.STANDARD_75_MINUTE_SLOTS[0])
     monday_slots = {slot["hour"]: slot for slot in days[0]["slots"]}
     assert monday_slots["18:30"]["occupancy_score"] == 100
     assert monday_slots["18:30"]["occupancy_level"] == "very_high"
+    assert monday_slots["07:15"] == {
+        "hour": "07:15",
+        "occupancy_score": None,
+        "occupancy_level": "unknown",
+    }
 
 
-def test_heatmap_without_data_returns_empty_days_and_null_space_id(
+def test_heatmap_without_matching_data_returns_all_requested_empty_days(
     tmp_path, monkeypatch
 ):
     monkeypatch.setattr(
         historical_service,
         "load_historical_data",
-        historical_records,
+        empty_historical_records,
     )
     with make_client(tmp_path, monkeypatch) as client:
         response = client.get(
@@ -434,7 +570,10 @@ def test_heatmap_without_data_returns_empty_days_and_null_space_id(
     assert response.status_code == 200
     assert response.json()["data"] == {
         "space_id": None,
-        "days": [],
+        "days": [
+            {"date": "2026-05-01", "slots": []},
+            {"date": "2026-05-02", "slots": []},
+        ],
     }
 
 
@@ -464,6 +603,102 @@ def test_heatmap_filters_by_space_and_exact_date(
         "08:30",
         "18:30",
     }
+    assert all(
+        slot["occupancy_level"] in {"low", "medium", "high", "very_high"}
+        for slot in data["days"][0]["slots"]
+    )
+
+
+def test_heatmap_emits_unknown_for_unobserved_dates_and_known_fitness_slots(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        historical_service,
+        "load_historical_data",
+        historical_records,
+    )
+    with make_client(tmp_path, monkeypatch) as client:
+        response = client.get(
+            "/api/v1/availability/heatmap",
+            params={
+                "space_id": FITNESS_SPACE_ID,
+                "from": "2026-04-20",
+                "to": "2026-04-20",
+            },
+        )
+
+    assert response.status_code == 200
+    slots = response.json()["data"]["days"][0]["slots"]
+    assert {slot["hour"] for slot in slots} == set(
+        historical_service.STANDARD_75_MINUTE_SLOTS[0]
+    )
+    slots_by_hour = {slot["hour"]: slot for slot in slots}
+    assert slots_by_hour["18:30"]["occupancy_score"] == 100
+    assert slots_by_hour["18:30"]["occupancy_level"] == "very_high"
+    assert all(
+        slot["occupancy_score"] is None
+        and slot["occupancy_level"] == "unknown"
+        for hour, slot in slots_by_hour.items()
+        if hour not in {"08:30", "18:30"}
+    )
+
+
+def test_heatmap_nonfitness_uses_observed_hours_on_unobserved_weekdays(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        historical_service,
+        "load_historical_data",
+        historical_records,
+    )
+    with make_client(tmp_path, monkeypatch) as client:
+        response = client.get(
+            "/api/v1/availability/heatmap",
+            params={
+                "space_id": TENNIS_SPACE_ID,
+                "from": "2026-04-08",
+                "to": "2026-04-08",
+            },
+        )
+
+    assert response.status_code == 200
+    slots = response.json()["data"]["days"][0]["slots"]
+    assert {slot["hour"] for slot in slots} == {"08:30", "18:30"}
+    assert all(
+        slot["occupancy_score"] is None
+        and slot["occupancy_level"] == "unknown"
+        for slot in slots
+    )
+
+
+def test_heatmap_without_any_history_returns_unknown_known_fitness_slots(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        historical_service,
+        "load_historical_data",
+        empty_historical_records,
+    )
+    with make_client(tmp_path, monkeypatch) as client:
+        response = client.get(
+            "/api/v1/availability/heatmap",
+            params={
+                "space_id": FITNESS_SPACE_ID,
+                "from": "2026-04-06",
+                "to": "2026-04-06",
+            },
+        )
+
+    assert response.status_code == 200
+    slots = response.json()["data"]["days"][0]["slots"]
+    assert {slot["hour"] for slot in slots} == set(
+        historical_service.STANDARD_75_MINUTE_SLOTS[0]
+    )
+    assert all(
+        slot["occupancy_score"] is None
+        and slot["occupancy_level"] == "unknown"
+        for slot in slots
+    )
 
 
 def test_heatmap_rejects_invalid_date_and_reversed_range(
@@ -645,3 +880,12 @@ def test_analytics_routes_keep_api_v1_prefix():
     assert "/api/v1/admin/occupancy" in paths
     assert "/api/v1/admin/stats" in paths
     assert "/availability/heatmap" not in paths
+
+    app_paths = {
+        route.path
+        for route in main.app.routes
+        if hasattr(route, "path")
+    }
+    assert "/api/v1/availability/week" in app_paths
+    assert "/api/v1/services" in app_paths
+    assert "/availability/week" not in app_paths

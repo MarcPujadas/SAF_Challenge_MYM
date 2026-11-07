@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from datetime import date as date_type
 from datetime import datetime
+from datetime import timedelta
 from uuid import uuid4
 
 from fastapi import FastAPI, Query, Request
@@ -52,16 +53,21 @@ def parse_date(
     value: str,
 ) -> date_type:
     try:
-        return datetime.strptime(
-            value,
-            "%Y-%m-%d",
-        ).date()
+        parsed_date = date_type.fromisoformat(value)
 
     except ValueError as exc:
         raise ApiError(
             "INVALID_DATE",
             "Date must use YYYY-MM-DD format.",
         ) from exc
+
+    if parsed_date.isoformat() != value:
+        raise ApiError(
+            "INVALID_DATE",
+            "Date must use YYYY-MM-DD format.",
+        )
+
+    return parsed_date
 
 
 def time_to_minutes(
@@ -441,13 +447,20 @@ def list_services():
         rows = connection.execute(
             """
             SELECT
-                id,
-                name,
-                description,
-                space_id,
-                reservable
+                services.id,
+                services.name,
+                services.description,
+                services.space_id,
+                CASE
+                    WHEN services.reservable = 1
+                        AND spaces.reservable = 1
+                    THEN 1
+                    ELSE 0
+                END AS reservable
             FROM services
-            ORDER BY name
+            LEFT JOIN spaces
+                ON spaces.id = services.space_id
+            ORDER BY services.name
             """
         ).fetchall()
 
@@ -624,6 +637,108 @@ def availability(
             "slots": (
                 slots
             ),
+        }
+    )
+
+
+@app.get(
+    "/api/v1/availability/week"
+)
+def availability_week(
+    space_id: str = Query(...),
+    date_from: str = Query(..., alias="from"),
+    date_to: str = Query(..., alias="to"),
+):
+    start_date = parse_date(date_from)
+    end_date = parse_date(date_to)
+    if start_date > end_date:
+        raise ApiError(
+            "INVALID_DATE_RANGE",
+            "'from' must be on or before 'to'.",
+        )
+
+    space = get_space(space_id)
+    if not bool(space["reservable"]):
+        raise ApiError(
+            "INVALID_SPACE",
+            "This space is not reservable.",
+        )
+
+    with get_connection() as connection:
+        reservations = connection.execute(
+            """
+            SELECT date, start, end
+            FROM reservations
+            WHERE
+                space_id = ?
+                AND date >= ?
+                AND date <= ?
+                AND status = 'confirmed'
+            ORDER BY date, start
+            """,
+            (
+                space_id,
+                start_date.isoformat(),
+                end_date.isoformat(),
+            ),
+        ).fetchall()
+
+    reservations_by_date: dict[str, list[tuple[int, int]]] = {}
+    for reservation in reservations:
+        reservations_by_date.setdefault(
+            reservation["date"],
+            [],
+        ).append(
+            (
+                time_to_minutes(reservation["start"]),
+                time_to_minutes(reservation["end"]),
+            )
+        )
+
+    days = []
+    current_date = start_date
+    while current_date <= end_date:
+        date_string = current_date.isoformat()
+        reservation_intervals = reservations_by_date.get(
+            date_string,
+            [],
+        )
+        slots = []
+        for start, end in build_slots(
+            space["id"],
+            space["type"],
+            current_date.weekday(),
+        ):
+            reservations_in_slot = sum(
+                overlaps(start, end, reserved_start, reserved_end)
+                for reserved_start, reserved_end in reservation_intervals
+            )
+            remaining_capacity = max(
+                int(space["capacity"]) - reservations_in_slot,
+                0,
+            )
+            slots.append(
+                {
+                    "start": minutes_to_time(start),
+                    "end": minutes_to_time(end),
+                    "available": remaining_capacity > 0,
+                    "remaining_capacity": remaining_capacity,
+                }
+            )
+        days.append(
+            {
+                "date": date_string,
+                "slots": slots,
+            }
+        )
+        current_date += timedelta(days=1)
+
+    return success(
+        {
+            "space_id": space_id,
+            "from": start_date.isoformat(),
+            "to": end_date.isoformat(),
+            "days": days,
         }
     )
 
@@ -866,7 +981,9 @@ def list_reservations(
             FROM reservations r
             JOIN spaces s
                 ON s.id = r.space_id
-            WHERE r.user_id = ?
+            WHERE
+                r.user_id = ?
+                AND r.status = 'confirmed'
             ORDER BY
                 r.date,
                 r.start

@@ -1,5 +1,6 @@
-from pathlib import Path
+from datetime import date as date_type
 from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
 
@@ -185,43 +186,29 @@ def add_occupancy_scores(statistics):
     return statistics
 
 
-def get_historical_occupancy_by_date(
-    date_from=None,
-    date_to=None,
-    space_id=None,
-):
+def _empty_historical_occupancy():
+    return pd.DataFrame(
+        columns=[
+            "space_id",
+            "date",
+            "start_time",
+            "reservations",
+            "occupancy_score",
+            "occupancy_level",
+        ]
+    )
+
+
+def _get_scored_historical_occupancy():
     df = load_historical_data()
     if df.empty:
-        return pd.DataFrame(
-            columns=[
-                "space_id",
-                "date",
-                "start_time",
-                "reservations",
-                "occupancy_score",
-                "occupancy_level",
-            ]
-        )
+        return _empty_historical_occupancy()
 
+    df = df.copy()
     df["date"] = df["date"].astype(str)
-    if date_from is not None:
-        df = df[df["date"] >= date_from]
-    if date_to is not None:
-        df = df[df["date"] <= date_to]
-    if space_id is not None:
-        df = df[df["space_id"] == space_id]
-    if df.empty:
-        return pd.DataFrame(
-            columns=[
-                "space_id",
-                "date",
-                "start_time",
-                "reservations",
-                "occupancy_score",
-                "occupancy_level",
-            ]
-        )
-
+    df["weekday"] = df["date"].map(
+        lambda value: date_type.fromisoformat(value).weekday()
+    )
     is_fitness = df["space_id"] == "sala-fitnes-sala-cardio"
     if is_fitness.any():
         fitness = df[is_fitness]
@@ -238,19 +225,11 @@ def get_historical_occupancy_by_date(
             [
                 df[~is_fitness],
                 fitness[valid_slots],
-            ]
+            ],
+            ignore_index=True,
         )
     if df.empty:
-        return pd.DataFrame(
-            columns=[
-                "space_id",
-                "date",
-                "start_time",
-                "reservations",
-                "occupancy_score",
-                "occupancy_level",
-            ]
-        )
+        return _empty_historical_occupancy()
 
     daily_reservations = (
         df.groupby(
@@ -297,6 +276,115 @@ def get_historical_occupancy_by_date(
             "occupancy_level",
         ]
     ]
+
+
+def get_historical_occupancy_by_date(
+    date_from=None,
+    date_to=None,
+    space_id=None,
+):
+    result = _get_scored_historical_occupancy()
+    if date_from is not None:
+        result = result[result["date"] >= date_from]
+    if date_to is not None:
+        result = result[result["date"] <= date_to]
+    if space_id is not None:
+        result = result[result["space_id"] == space_id]
+    return result.reset_index(drop=True)
+
+
+def get_historical_heatmap(
+    date_from=None,
+    date_to=None,
+    space_id=None,
+):
+    records = get_historical_occupancy_by_date(
+        space_id=space_id,
+    )
+    records = records.copy()
+    records["weekday"] = records["date"].map(
+        lambda value: date_type.fromisoformat(value).weekday()
+    )
+    if date_from is None and date_to is None:
+        if records.empty:
+            return []
+        start_date = date_type.fromisoformat(records["date"].min())
+        end_date = date_type.fromisoformat(records["date"].max())
+    elif date_from is None:
+        start_date = date_type.fromisoformat(date_to)
+        end_date = start_date
+    elif date_to is None:
+        start_date = date_type.fromisoformat(date_from)
+        end_date = start_date
+    else:
+        start_date = date_type.fromisoformat(date_from)
+        end_date = date_type.fromisoformat(date_to)
+
+    spaces = (
+        [space_id]
+        if space_id is not None
+        else sorted(records["space_id"].unique())
+    )
+    slots_by_space_weekday = {}
+    for current_space_id in spaces:
+        space_records = records[
+            records["space_id"] == current_space_id
+        ]
+        for weekday in range(7):
+            if current_space_id == "sala-fitnes-sala-cardio":
+                valid_slots = FITNESS_VALID_SLOTS.get(weekday, [])
+            else:
+                valid_slots = sorted(space_records["start_time"].unique())
+            slots_by_space_weekday[(current_space_id, weekday)] = valid_slots
+
+    days = []
+    current_date = start_date
+    while current_date <= end_date:
+        weekday = current_date.weekday()
+        valid_slots = sorted(
+            {
+                slot
+                for current_space_id in spaces
+                for slot in slots_by_space_weekday[
+                    (current_space_id, weekday)
+                ]
+            }
+        )
+        weekday_records = records[records["weekday"] == weekday]
+        slots = []
+        for hour in valid_slots:
+            matching_records = weekday_records[
+                weekday_records["start_time"] == hour
+            ]
+            if space_id is not None:
+                matching_records = matching_records[
+                    matching_records["space_id"] == space_id
+                ]
+            if matching_records.empty:
+                score = None
+                level = "unknown"
+            else:
+                score = int(
+                    round(matching_records["occupancy_score"].mean())
+                )
+                level = occupancy_level(score)
+            slots.append(
+                {
+                    "hour": hour,
+                    "occupancy_score": score,
+                    "occupancy_level": level,
+                }
+            )
+        days.append(
+            {
+                "date": current_date.isoformat(),
+                "slots": slots,
+            }
+        )
+        current_date = date_type.fromordinal(
+            current_date.toordinal() + 1
+        )
+    return days
 
 
 def get_historical_occupancy_by_hour():
