@@ -681,3 +681,55 @@ def list_reservations(
             for row in rows
         ]
     )
+
+
+@app.delete("/api/v1/reservations/{reservation_id}")
+def cancel_reservation(
+    reservation_id: str
+):
+    with get_connection() as connection:
+
+        reservation = connection.execute(
+            """
+            SELECT
+                id,
+                status
+            FROM reservations
+            WHERE id = ?
+            """,
+            (
+                reservation_id,
+            )
+        ).fetchone()
+
+        if reservation is None:
+            raise ApiError(
+                "RESERVATION_NOT_FOUND",
+                "The requested reservation does not exist.",
+                404
+            )
+
+        if reservation["status"] == "cancelled":
+            raise ApiError(
+                "RESERVATION_ALREADY_CANCELLED",
+                "The reservation is already cancelled.",
+                409
+            )
+
+        connection.execute(
+            """
+            UPDATE reservations
+            SET status = 'cancelled'
+            WHERE id = ?
+            """,
+            (
+                reservation_id,
+            )
+        )
+
+    return success(
+        {
+            "reservation_id": reservation_id,
+            "status": "cancelled"
+        }
+    )

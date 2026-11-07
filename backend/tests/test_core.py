@@ -379,3 +379,64 @@ def test_rejects_full_slot(
             full.json()["error"]["code"]
             == "SLOT_NOT_AVAILABLE"
         )
+
+def test_cancel_reservation(
+    tmp_path,
+    monkeypatch
+):
+    with make_client(
+        tmp_path,
+        monkeypatch
+    ) as client:
+
+        seed_test_data()
+
+        payload = {
+            "user_id": "demo-user",
+            "space_id": FITNESS_SPACE_ID,
+            "date": "2026-11-10",
+            "start": "18:30",
+            "end": "19:45"
+        }
+
+        created = client.post(
+            "/api/v1/reservations",
+            json=payload
+        )
+
+        assert created.status_code == 200
+
+        reservation_id = (
+            created.json()["data"][
+                "reservation_id"
+            ]
+        )
+
+        cancelled = client.delete(
+            f"/api/v1/reservations/"
+            f"{reservation_id}"
+        )
+
+        assert cancelled.status_code == 200
+        assert cancelled.json()["success"] is True
+
+        assert (
+            cancelled.json()["data"]["status"]
+            == "cancelled"
+        )
+
+        listed = client.get(
+            "/api/v1/reservations",
+            params={
+                "user_id": "demo-user"
+            }
+        )
+
+        reservations = listed.json()["data"]
+
+        assert len(reservations) == 1
+
+        assert (
+            reservations[0]["status"]
+            == "cancelled"
+        )
