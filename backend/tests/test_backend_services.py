@@ -112,6 +112,14 @@ def test_cancelled_reservation_disappears_and_releases_capacity(
         reservation_service.cancel_reservation(reservation["reservation_id"])
         assert reservation_service.list_user_reservations("demo-user") == []
 
+        history = reservation_service.list_user_reservations(
+            "demo-user",
+            include_cancelled=True,
+        )
+        assert len(history) == 1
+        assert history[0]["reservation_id"] == reservation["reservation_id"]
+        assert history[0]["status"] == "cancelled"
+
         reopened_slot = availability_service.get_slot_availability(
             TENNIS_SPACE_ID,
             schedule_service.parse_date(TEST_DATE),
