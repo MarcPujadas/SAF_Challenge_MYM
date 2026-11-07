@@ -15,7 +15,6 @@ def normalize_text(text):
     )
 
     text = re.sub(r"\([^)]*\)", "", text)
-
     text = re.sub(r"\s+", " ", text)
 
     return text.strip()
@@ -116,56 +115,53 @@ def detect_space_id(resource):
     return None
 
 
-df = pd.read_excel(
-    FILE_PATH,
-    sheet_name="Reserves"
-)
-
-resources = (
-    df["Recurs"]
-    .dropna()
-    .drop_duplicates()
-    .sort_values()
-)
-
-mapped = []
-unmapped = []
-
-for resource in resources:
-
-    space_id = detect_space_id(resource)
-
-    if space_id:
-        mapped.append(
-            {
-                "resource": resource,
-                "space_id": space_id
-            }
-        )
-    else:
-        unmapped.append(resource)
-
-
-print("=" * 70)
-print("RECURSOS MAPEJATS")
-print("=" * 70)
-
-for item in mapped:
-    print(
-        f"{item['resource']} "
-        f"--> {item['space_id']}"
+if __name__ == "__main__":
+    df = pd.read_excel(
+        FILE_PATH,
+        sheet_name="Reserves"
     )
 
+    resources = (
+        df["Recurs"]
+        .dropna()
+        .drop_duplicates()
+        .sort_values()
+    )
 
-print("\n")
-print("=" * 70)
-print("RECURSOS ENCARA NO MAPEJATS")
-print("=" * 70)
+    mapped = []
+    unmapped = []
 
-for resource in unmapped:
-    print(resource)
+    for resource in resources:
+        space_id = detect_space_id(resource)
 
+        if space_id:
+            mapped.append(
+                {
+                    "resource": resource,
+                    "space_id": space_id
+                }
+            )
+        else:
+            unmapped.append(resource)
 
-print("\nRESUM")
-print("Mapejats:", len(mapped))
-print("No mapejats:", len(unmapped))
+    print("=" * 70)
+    print("RECURSOS MAPEJATS")
+    print("=" * 70)
+
+    for item in mapped:
+        print(
+            f"{item['resource']} "
+            f"--> {item['space_id']}"
+        )
+
+    print("\n")
+    print("=" * 70)
+    print("RECURSOS ENCARA NO MAPEJATS")
+    print("=" * 70)
+
+    for resource in unmapped:
+        print(resource)
+
+    print("\nRESUM")
+    print("Mapejats:", len(mapped))
+    print("No mapejats:", len(unmapped))
