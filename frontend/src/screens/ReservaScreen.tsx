@@ -65,6 +65,7 @@ export default function ReservaScreen({ navigation }: Props) {
   const [advice, setAdvice] = useState<Recommendation | null>(null);
   const [adviceLoading, setAdviceLoading] = useState(false);
   const [adviceFailed, setAdviceFailed] = useState(false);
+  const [adviceNoData, setAdviceNoData] = useState<string | null>(null);
 
   // Pas 5: confirmar
   const [submitting, setSubmitting] = useState(false);
@@ -104,6 +105,7 @@ export default function ReservaScreen({ navigation }: Props) {
     setAdvice(null);
     setAdviceLoading(false);
     setAdviceFailed(false);
+    setAdviceNoData(null);
     try {
       const result = await getAvailability(spaceId, day);
       if (id !== availReq.current) return;
@@ -127,6 +129,7 @@ export default function ReservaScreen({ navigation }: Props) {
     setAdvice(null);
     setAdviceLoading(false);
     setAdviceFailed(false);
+    setAdviceNoData(null);
     setSubmitError(null);
   }
 
@@ -143,6 +146,7 @@ export default function ReservaScreen({ navigation }: Props) {
     setSlot(s);
     setAdvice(null);
     setAdviceFailed(false);
+    setAdviceNoData(null);
     setAdviceLoading(true);
     setSubmitError(null);
     try {
@@ -154,9 +158,14 @@ export default function ReservaScreen({ navigation }: Props) {
       });
       if (id !== adviceReq.current) return;
       setAdvice(rec);
-    } catch {
+    } catch (err) {
       if (id !== adviceReq.current) return;
-      setAdviceFailed(true); // SAFi no bloqueja la reserva
+      // SAFi no bloqueja la reserva en cap cas.
+      if (err instanceof ApiError && err.code === 'OCCUPANCY_DATA_UNAVAILABLE') {
+        setAdviceNoData(errorMessage(err));
+      } else {
+        setAdviceFailed(true);
+      }
     }
     if (id === adviceReq.current) setAdviceLoading(false);
   }
@@ -268,6 +277,12 @@ export default function ReservaScreen({ navigation }: Props) {
                   <Text style={styles.altButtonText}>Canviar a {altSlot.start}</Text>
                 </Pressable>
               )}
+            </View>
+          )}
+          {adviceNoData && (
+            <View style={styles.safiBox}>
+              <Text style={styles.safiTitle}>SAFi</Text>
+              <Text style={styles.safiText}>{adviceNoData}</Text>
             </View>
           )}
           {adviceFailed && (

@@ -5,9 +5,12 @@ import type {
   Availability,
   Recommendation,
   RecommendationRequest,
+  ReservationCancelled,
   ReservationCreated,
   ReservationItem,
   ReservationRequest,
+  SafiChatRequest,
+  SafiChatResponse,
   Service,
   Slot,
 } from './types';
@@ -156,4 +159,32 @@ export async function getReservations(userId: string): Promise<ReservationItem[]
       end: r.end,
       status: r.status,
     }));
+}
+
+// Mateixos codis d'error que el backend (RESERVATION_NOT_FOUND, RESERVATION_ALREADY_CANCELLED).
+export async function cancelReservation(reservationId: string): Promise<ReservationCancelled> {
+  await delay();
+  const found = reservations.find((r) => r.reservation_id === reservationId);
+  if (!found) {
+    throw new ApiError('RESERVATION_NOT_FOUND', 'Reserva no trobada.');
+  }
+  if (found.status === 'cancelled') {
+    throw new ApiError('RESERVATION_ALREADY_CANCELLED', 'La reserva ja estava cancel·lada.');
+  }
+  found.status = 'cancelled';
+  return { reservation_id: found.reservation_id, status: found.status };
+}
+
+// Respostes fixes: una sobre fitness (can_answer true) i "no ho se" per a la resta.
+export async function chatSafi(req: SafiChatRequest): Promise<SafiChatResponse> {
+  await delay();
+  if (req.message.toLowerCase().includes('fitness')) {
+    return {
+      message:
+        'Segons les dades disponibles, les 19:00 tenen menys ocupació prevista que les 18:00.',
+      sources: [{ type: 'historical_occupancy', space_id: 'fitness', date_reference: 'Tuesday' }],
+      can_answer: true,
+    };
+  }
+  return { message: 'No ho sé amb les dades disponibles.', sources: [], can_answer: false };
 }

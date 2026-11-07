@@ -99,3 +99,27 @@ export type ReservationItem = {
   end: string;
   status: ReservationStatus;
 };
+
+// DELETE /reservations/{reservation_id}
+export type ReservationCancelled = {
+  reservation_id: string;
+  status: ReservationStatus;
+};
+
+// POST /safi/chat
+export type SafiChatRequest = {
+  user_id: string;
+  message: string;
+};
+
+export type SafiSource = {
+  type: string;
+  space_id: string;
+  date_reference: string;
+};
+
+export type SafiChatResponse = {
+  message: string;
+  sources: SafiSource[];
+  can_answer: boolean;
+};

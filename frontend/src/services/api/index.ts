@@ -5,9 +5,12 @@ import type {
   Availability,
   Recommendation,
   RecommendationRequest,
+  ReservationCancelled,
   ReservationCreated,
   ReservationItem,
   ReservationRequest,
+  SafiChatRequest,
+  SafiChatResponse,
   Service,
 } from './types';
 
@@ -43,6 +46,22 @@ export function getReservations(userId: string = DEFAULT_USER_ID): Promise<Reser
   return USE_MOCKS
     ? mocks.getReservations(userId)
     : request<ReservationItem[]>('GET', '/reservations', { query: { user_id: userId } });
+}
+
+export function cancelReservation(reservationId: string): Promise<ReservationCancelled> {
+  return USE_MOCKS
+    ? mocks.cancelReservation(reservationId)
+    : request<ReservationCancelled>('DELETE', `/reservations/${encodeURIComponent(reservationId)}`);
+}
+
+export function chatSafi(
+  message: string,
+  userId: string = DEFAULT_USER_ID,
+): Promise<SafiChatResponse> {
+  const body: SafiChatRequest = { user_id: userId, message };
+  return USE_MOCKS
+    ? mocks.chatSafi(body)
+    : request<SafiChatResponse>('POST', '/safi/chat', { body });
 }
 
 export { ApiError } from './client';
