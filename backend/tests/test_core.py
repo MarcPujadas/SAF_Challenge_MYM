@@ -440,3 +440,82 @@ def test_cancel_reservation(
             reservations[0]["status"]
             == "cancelled"
         )
+
+def test_general_opening_hours(
+    tmp_path,
+    monkeypatch
+):
+    with make_client(
+        tmp_path,
+        monkeypatch
+    ) as client:
+
+        seed_test_data()
+
+        # Monday
+        weekday_response = client.get(
+            "/api/v1/availability",
+            params={
+                "space_id": TENNIS_SPACE_ID,
+                "date": "2026-11-09"
+            }
+        )
+
+        assert (
+            weekday_response.status_code
+            == 200
+        )
+
+        weekday_slots = (
+            weekday_response.json()[
+                "data"
+            ]["slots"]
+        )
+
+        assert len(
+            weekday_slots
+        ) == 14
+
+        assert (
+            weekday_slots[0]["start"]
+            == "07:00"
+        )
+
+        assert (
+            weekday_slots[-1]["end"]
+            == "21:00"
+        )
+
+        # Sunday
+        sunday_response = client.get(
+            "/api/v1/availability",
+            params={
+                "space_id": TENNIS_SPACE_ID,
+                "date": "2026-11-15"
+            }
+        )
+
+        assert (
+            sunday_response.status_code
+            == 200
+        )
+
+        sunday_slots = (
+            sunday_response.json()[
+                "data"
+            ]["slots"]
+        )
+
+        assert len(
+            sunday_slots
+        ) == 5
+
+        assert (
+            sunday_slots[0]["start"]
+            == "09:00"
+        )
+
+        assert (
+            sunday_slots[-1]["end"]
+            == "14:00"
+        )

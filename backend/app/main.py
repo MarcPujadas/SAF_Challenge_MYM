@@ -17,6 +17,16 @@ from app.services.historical_service import (
     get_historical_occupancy,
 )
 
+GENERAL_OPENING_HOURS = {
+    0: ("07:00", "21:00"),  # Monday
+    1: ("07:00", "21:00"),  # Tuesday
+    2: ("07:00", "21:00"),  # Wednesday
+    3: ("07:00", "21:00"),  # Thursday
+    4: ("07:00", "21:00"),  # Friday
+    5: ("08:00", "20:00"),  # Saturday
+    6: ("09:00", "14:00"),  # Sunday
+}
+
 
 class ReservationCreate(BaseModel):
     user_id: str
@@ -155,18 +165,43 @@ def build_slots(
             for start in valid_slots
         ]
 
-    duration = 60
-
-    starts = range(
-        8 * 60,
-        21 * 60 + 1,
-        duration
+    opening_hours = (
+        GENERAL_OPENING_HOURS.get(
+            weekday
+        )
     )
 
-    return [
-        (start, start + duration)
-        for start in starts
-    ]
+    if opening_hours is None:
+        return []
+
+    opening_time = time_to_minutes(
+        opening_hours[0]
+    )
+
+    closing_time = time_to_minutes(
+        opening_hours[1]
+    )
+
+    duration = 60
+
+    slots = []
+
+    start = opening_time
+
+    while (
+        start + duration
+        <= closing_time
+    ):
+        slots.append(
+            (
+                start,
+                start + duration
+            )
+        )
+
+        start += duration
+
+    return slots
 
 
 def validate_reservation_slot(
