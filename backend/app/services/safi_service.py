@@ -3,6 +3,10 @@ import unicodedata
 from datetime import date, timedelta
 from typing import Any
 
+from app.config.services import (
+    SERVICE_SEARCH_PHRASES,
+    SPACE_ID_BY_ALIAS,
+)
 from app.services.historical_service import (
     get_historical_occupancy,
 )
@@ -15,43 +19,9 @@ from app.services.validation import WEEKDAYS_CA, validate_date_time
 
 UNKNOWN_MESSAGE = "No ho sé amb les dades disponibles."
 SPACE_ALIASES = {
-    "fitness": "sala-fitnes-sala-cardio",
-    "pool-25m": "piscina-25-metres-carrer-1",
-    "pool-16m": "piscina-de-16-metres",
-    "padel": "pistes-de-padel-pista-1",
-    "tennis": "tennis-tennis-1",
-    "squash": "esquaix-esquaix-2",
-    "football": "futbol-7-camp-1",
-    "guided-activities": "sales-activitats-dirigides-sala-1",
+    **SPACE_ID_BY_ALIAS,
 }
-SERVICE_PHRASES = [
-    ("activitats dirigides", "guided-activities"),
-    ("activitat dirigida", "guided-activities"),
-    ("guided activities", "guided-activities"),
-    ("clases dirigidas", "guided-activities"),
-    ("clase dirigida", "guided-activities"),
-    ("piscina de 16", "pool-16m"),
-    ("pool de 16", "pool-16m"),
-    ("piscina de 25", "pool-25m"),
-    ("pool de 25", "pool-25m"),
-    ("pool 16", "pool-16m"),
-    ("piscina 16", "pool-16m"),
-    ("pool 25", "pool-25m"),
-    ("piscina 25", "pool-25m"),
-    ("esquaix", "squash"),
-    ("squash", "squash"),
-    ("futbol", "football"),
-    ("football", "football"),
-    ("padel", "padel"),
-    ("tennis", "tennis"),
-    ("tenis", "tennis"),
-    ("fitness", "fitness"),
-    ("fitnes", "fitness"),
-    ("pool", "pool-25m"),
-    ("piscina", "pool-25m"),
-    ("swimming pool", "pool-25m"),
-    ("natacio", "pool-25m"),
-]
+SERVICE_PHRASES = SERVICE_SEARCH_PHRASES
 LEVEL_CA = {
     "low": "baixa",
     "medium": "mitjana",
@@ -73,7 +43,7 @@ def detect_space_id(message: str) -> str | None:
     normalized = normalize_text(message)
     for phrase, service_id in SERVICE_PHRASES:
         if phrase in normalized:
-            return SPACE_ALIASES[service_id]
+            return SPACE_ID_BY_ALIAS[service_id]
     return None
 
 

@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from app import main
 from app.database import database
+from app.services import availability_service
 from scripts.import_services import SERVICES, main as import_services
 
 
@@ -38,7 +39,7 @@ def make_client(
     )
 
     monkeypatch.setattr(
-        main,
+        availability_service,
         "get_historical_occupancy",
         fake_historical_occupancy,
     )
@@ -515,7 +516,7 @@ def test_week_availability_includes_all_days_and_uses_sqlite_only(
         seed_test_data()
         with monkeypatch.context() as patcher:
             patcher.setattr(
-                main,
+                availability_service,
                 "get_historical_occupancy",
                 lambda **_: (_ for _ in ()).throw(
                     AssertionError("weekly availability must not use history")

@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 
 from app import main
 from app.database import database
-from app.routers import safi_admin
+from app.routers import recommendations
 
 
 FITNESS_SPACE_ID = "sala-fitnes-sala-cardio"
@@ -51,7 +51,7 @@ def make_client(
     )
 
     monkeypatch.setattr(
-        safi_admin,
+        recommendations,
         "recommend",
         fake_recommend,
     )

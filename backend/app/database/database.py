@@ -90,6 +90,12 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_reservations_user_date
             ON reservations(user_id, date);
+
+            CREATE INDEX IF NOT EXISTS idx_reservations_user_date_status
+            ON reservations(user_id, date, status);
+
+            CREATE INDEX IF NOT EXISTS idx_reservations_space_date_status
+            ON reservations(space_id, date, status);
             """
         )
 

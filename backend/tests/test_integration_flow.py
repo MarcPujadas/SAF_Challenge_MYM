@@ -2,7 +2,8 @@ from fastapi.testclient import TestClient
 
 from app import main
 from app.database import database
-from app.routers import safi_admin
+from app.routers import recommendations
+from app.services import availability_service
 
 
 FITNESS_SPACE_ID = "sala-fitnes-sala-cardio"
@@ -84,18 +85,14 @@ def make_client(
         tmp_path / "test_integration.db",
     )
 
-    # /availability utilitza aquesta funció
-    # importada directament a main.py.
     monkeypatch.setattr(
-        main,
+        availability_service,
         "get_historical_occupancy",
         fake_historical_occupancy,
     )
 
-    # /recommendations utilitza recommend
-    # importat directament a safi_admin.py.
     monkeypatch.setattr(
-        safi_admin,
+        recommendations,
         "recommend",
         fake_recommend,
     )

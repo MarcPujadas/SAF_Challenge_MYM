@@ -813,6 +813,56 @@ Si no existeixen dades suficients:
 
 SAFi no ha d'inventar informació quan les dades disponibles no permetin respondre.
 
+## POST /safi/chat-llm
+
+Utilitza Ornith per redactar una resposta a partir de tools internes del backend.
+Les tools només poden consultar previsió històrica, disponibilitat actual o
+reserves confirmades de l'usuari indicat al request. L'identificador d'usuari
+no es rep mai del model. Aquest endpoint no crea ni cancel·la reserves.
+
+### Request
+
+Mateix cos que `POST /safi/chat`:
+
+```json
+{
+  "user_id": "demo-user",
+  "message": "Quina ocupació històrica hi ha al fitness demà a les 18:30?"
+}
+```
+
+### Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "message": "La previsió històrica indica una ocupació molt alta.",
+    "sources": [
+      {
+        "type": "historical_occupancy",
+        "space_id": "sala-fitnes-sala-cardio"
+      }
+    ],
+    "can_answer": true,
+    "provider": "uab-ornith"
+  },
+  "error": null
+}
+```
+
+Si no es consulta cap dada utilitzable, la resposta segueix el contracte de
+SAFi sense dades: `can_answer` és `false`, `sources` és `[]` i el missatge és
+equivalent a "No ho sé amb les dades disponibles."
+
+Errors:
+
+- `LLM_UNAVAILABLE` (`503`): Ornith no està configurat, falla o supera el timeout.
+- `LLM_ERROR` (`502`): Ornith retorna una resposta incompatible amb el protocol.
+
+La clau d'Ornith s'ha de configurar al servidor mitjançant `UTH_KEY`; no forma
+part del request ni de la resposta.
+
 ---
 
 # 14. Usuari actual

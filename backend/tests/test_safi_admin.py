@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from app import main
 from app.database import database
-from app.routers import safi_admin
+from app.routers import availability, recommendations, safi_admin
 from app.services import historical_service
 from app.services import recommendation_service
 from app.services import safi_service
@@ -103,7 +103,11 @@ def test_recommendation_uses_historical_service_and_rejects_missing_data(
                 "historical_period": "2026-04-01 to 2026-10-31",
             },
         }
-        with patch.object(safi_admin, "recommend", return_value=response_data) as mock:
+        with patch.object(
+            recommendations,
+            "recommend",
+            return_value=response_data,
+        ) as mock:
             response = client.post(
                 "/api/v1/recommendations",
                 json={
@@ -124,7 +128,7 @@ def test_recommendation_uses_historical_service_and_rejects_missing_data(
         )
 
         with patch.object(
-            safi_admin,
+            recommendations,
             "recommend",
             return_value={
                 **response_data,
@@ -150,7 +154,7 @@ def test_recommendation_uses_historical_service_and_rejects_missing_data(
 
 def test_recommendation_validates_time_before_calling_service(tmp_path, monkeypatch):
     with make_client(tmp_path, monkeypatch) as client:
-        with patch.object(safi_admin, "recommend") as mock:
+        with patch.object(        recommendations, "recommend") as mock:
             response = client.post(
                 "/api/v1/recommendations",
                 json={
