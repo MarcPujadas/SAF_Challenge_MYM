@@ -6,12 +6,13 @@ from app.database import database
 
 FITNESS_SPACE_ID = "sala-fitnes-sala-cardio"
 TENNIS_SPACE_ID = "tennis-tennis-1"
+POOL_SPACE_ID = "piscina-25-metres-carrer-1"
 
 
 def fake_historical_occupancy(
     space_id,
     weekday,
-    start_time
+    start_time,
 ):
     return {
         "space_id": space_id,
@@ -25,20 +26,25 @@ def fake_historical_occupancy(
     }
 
 
-def make_client(tmp_path, monkeypatch):
+def make_client(
+    tmp_path,
+    monkeypatch,
+):
     monkeypatch.setattr(
         database,
         "DB_PATH",
-        tmp_path / "test_safhack.db"
+        tmp_path / "test_safhack.db",
     )
 
     monkeypatch.setattr(
         main,
         "get_historical_occupancy",
-        fake_historical_occupancy
+        fake_historical_occupancy,
     )
 
-    return TestClient(main.app)
+    return TestClient(
+        main.app
+    )
 
 
 def seed_test_data():
@@ -46,13 +52,16 @@ def seed_test_data():
 
         connection.execute(
             """
-            INSERT INTO users (id, name)
+            INSERT INTO users (
+                id,
+                name
+            )
             VALUES (?, ?)
             """,
             (
                 "demo-user-2",
-                "Usuari Demo 2"
-            )
+                "Usuari Demo 2",
+            ),
         )
 
         connection.execute(
@@ -71,8 +80,8 @@ def seed_test_data():
                 "Sala fitnes + sala cardio",
                 "fitness",
                 120,
-                1
-            )
+                1,
+            ),
         )
 
         connection.execute(
@@ -91,8 +100,28 @@ def seed_test_data():
                 "Tennis - Tennis 1",
                 "court",
                 1,
-                1
+                1,
+            ),
+        )
+
+        connection.execute(
+            """
+            INSERT INTO spaces (
+                id,
+                name,
+                type,
+                capacity,
+                reservable
             )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                POOL_SPACE_ID,
+                "Piscina 25 metres - Carrer 1",
+                "pool",
+                5,
+                1,
+            ),
         )
 
         connection.execute(
@@ -111,8 +140,8 @@ def seed_test_data():
                 "Fitness",
                 "Sala de fitness i cardio",
                 FITNESS_SPACE_ID,
-                1
-            )
+                1,
+            ),
         )
 
         connection.execute(
@@ -131,18 +160,18 @@ def seed_test_data():
                 "Tennis",
                 "Pistes de tennis",
                 TENNIS_SPACE_ID,
-                1
-            )
+                1,
+            ),
         )
 
 
 def test_services_and_availability(
     tmp_path,
-    monkeypatch
+    monkeypatch,
 ):
     with make_client(
         tmp_path,
-        monkeypatch
+        monkeypatch,
     ) as client:
 
         seed_test_data()
@@ -163,8 +192,8 @@ def test_services_and_availability(
             "/api/v1/availability",
             params={
                 "space_id": FITNESS_SPACE_ID,
-                "date": "2026-11-10"
-            }
+                "date": "2026-11-10",
+            },
         )
 
         assert availability.status_code == 200
@@ -172,7 +201,6 @@ def test_services_and_availability(
         body = availability.json()
 
         assert body["success"] is True
-
         assert (
             body["data"]["space_id"]
             == FITNESS_SPACE_ID
@@ -196,11 +224,11 @@ def test_services_and_availability(
 
 def test_create_and_list_reservation(
     tmp_path,
-    monkeypatch
+    monkeypatch,
 ):
     with make_client(
         tmp_path,
-        monkeypatch
+        monkeypatch,
     ) as client:
 
         seed_test_data()
@@ -210,17 +238,16 @@ def test_create_and_list_reservation(
             "space_id": FITNESS_SPACE_ID,
             "date": "2026-11-10",
             "start": "18:30",
-            "end": "19:45"
+            "end": "19:45",
         }
 
         created = client.post(
             "/api/v1/reservations",
-            json=payload
+            json=payload,
         )
 
         assert created.status_code == 200
         assert created.json()["success"] is True
-
         assert (
             created.json()["data"]["status"]
             == "confirmed"
@@ -229,8 +256,8 @@ def test_create_and_list_reservation(
         listed = client.get(
             "/api/v1/reservations",
             params={
-                "user_id": "demo-user"
-            }
+                "user_id": "demo-user",
+            },
         )
 
         assert listed.status_code == 200
@@ -238,30 +265,21 @@ def test_create_and_list_reservation(
         reservations = listed.json()["data"]
 
         assert len(reservations) == 1
-
         assert (
             reservations[0]["space_id"]
             == FITNESS_SPACE_ID
         )
-
-        assert (
-            reservations[0]["start"]
-            == "18:30"
-        )
-
-        assert (
-            reservations[0]["end"]
-            == "19:45"
-        )
+        assert reservations[0]["start"] == "18:30"
+        assert reservations[0]["end"] == "19:45"
 
 
 def test_rejects_invalid_fitness_slot(
     tmp_path,
-    monkeypatch
+    monkeypatch,
 ):
     with make_client(
         tmp_path,
-        monkeypatch
+        monkeypatch,
     ) as client:
 
         seed_test_data()
@@ -271,16 +289,15 @@ def test_rejects_invalid_fitness_slot(
             "space_id": FITNESS_SPACE_ID,
             "date": "2026-11-10",
             "start": "18:00",
-            "end": "19:00"
+            "end": "19:00",
         }
 
         response = client.post(
             "/api/v1/reservations",
-            json=payload
+            json=payload,
         )
 
         assert response.status_code == 400
-
         assert (
             response.json()["error"]["code"]
             == "INVALID_TIME"
@@ -289,11 +306,11 @@ def test_rejects_invalid_fitness_slot(
 
 def test_rejects_overlapping_user_reservation(
     tmp_path,
-    monkeypatch
+    monkeypatch,
 ):
     with make_client(
         tmp_path,
-        monkeypatch
+        monkeypatch,
     ) as client:
 
         seed_test_data()
@@ -303,31 +320,30 @@ def test_rejects_overlapping_user_reservation(
             "space_id": FITNESS_SPACE_ID,
             "date": "2026-11-10",
             "start": "18:30",
-            "end": "19:45"
+            "end": "19:45",
         }
 
         second = {
             "user_id": "demo-user",
             "space_id": TENNIS_SPACE_ID,
             "date": "2026-11-10",
-            "start": "19:00",
-            "end": "20:00"
+            "start": "18:30",
+            "end": "19:45",
         }
 
         first_response = client.post(
             "/api/v1/reservations",
-            json=first
+            json=first,
         )
 
         assert first_response.status_code == 200
 
         conflict = client.post(
             "/api/v1/reservations",
-            json=second
+            json=second,
         )
 
         assert conflict.status_code == 409
-
         assert (
             conflict.json()["error"]["code"]
             == "RESERVATION_CONFLICT"
@@ -336,11 +352,11 @@ def test_rejects_overlapping_user_reservation(
 
 def test_rejects_full_slot(
     tmp_path,
-    monkeypatch
+    monkeypatch,
 ):
     with make_client(
         tmp_path,
-        monkeypatch
+        monkeypatch,
     ) as client:
 
         seed_test_data()
@@ -349,44 +365,44 @@ def test_rejects_full_slot(
             "user_id": "demo-user",
             "space_id": TENNIS_SPACE_ID,
             "date": "2026-11-10",
-            "start": "19:00",
-            "end": "20:00"
+            "start": "18:30",
+            "end": "19:45",
         }
 
         second = {
             "user_id": "demo-user-2",
             "space_id": TENNIS_SPACE_ID,
             "date": "2026-11-10",
-            "start": "19:00",
-            "end": "20:00"
+            "start": "18:30",
+            "end": "19:45",
         }
 
         first_response = client.post(
             "/api/v1/reservations",
-            json=first
+            json=first,
         )
 
         assert first_response.status_code == 200
 
         full = client.post(
             "/api/v1/reservations",
-            json=second
+            json=second,
         )
 
         assert full.status_code == 409
-
         assert (
             full.json()["error"]["code"]
             == "SLOT_NOT_AVAILABLE"
         )
 
+
 def test_cancel_reservation(
     tmp_path,
-    monkeypatch
+    monkeypatch,
 ):
     with make_client(
         tmp_path,
-        monkeypatch
+        monkeypatch,
     ) as client:
 
         seed_test_data()
@@ -396,30 +412,26 @@ def test_cancel_reservation(
             "space_id": FITNESS_SPACE_ID,
             "date": "2026-11-10",
             "start": "18:30",
-            "end": "19:45"
+            "end": "19:45",
         }
 
         created = client.post(
             "/api/v1/reservations",
-            json=payload
+            json=payload,
         )
 
         assert created.status_code == 200
 
         reservation_id = (
-            created.json()["data"][
-                "reservation_id"
-            ]
+            created.json()["data"]["reservation_id"]
         )
 
         cancelled = client.delete(
-            f"/api/v1/reservations/"
-            f"{reservation_id}"
+            f"/api/v1/reservations/{reservation_id}"
         )
 
         assert cancelled.status_code == 200
         assert cancelled.json()["success"] is True
-
         assert (
             cancelled.json()["data"]["status"]
             == "cancelled"
@@ -428,94 +440,109 @@ def test_cancel_reservation(
         listed = client.get(
             "/api/v1/reservations",
             params={
-                "user_id": "demo-user"
-            }
+                "user_id": "demo-user",
+            },
         )
 
         reservations = listed.json()["data"]
 
         assert len(reservations) == 1
+        assert reservations[0]["status"] == "cancelled"
 
-        assert (
-            reservations[0]["status"]
-            == "cancelled"
-        )
 
 def test_general_opening_hours(
     tmp_path,
-    monkeypatch
+    monkeypatch,
 ):
     with make_client(
         tmp_path,
-        monkeypatch
+        monkeypatch,
     ) as client:
 
         seed_test_data()
 
-        # Monday
+        weekday_response = client.get(
+            "/api/v1/availability",
+            params={
+                "space_id": POOL_SPACE_ID,
+                "date": "2026-11-09",
+            },
+        )
+
+        assert weekday_response.status_code == 200
+
+        weekday_slots = (
+            weekday_response.json()["data"]["slots"]
+        )
+
+        assert len(weekday_slots) == 14
+        assert weekday_slots[0]["start"] == "07:00"
+        assert weekday_slots[-1]["end"] == "21:00"
+
+        sunday_response = client.get(
+            "/api/v1/availability",
+            params={
+                "space_id": POOL_SPACE_ID,
+                "date": "2026-11-15",
+            },
+        )
+
+        assert sunday_response.status_code == 200
+
+        sunday_slots = (
+            sunday_response.json()["data"]["slots"]
+        )
+
+        assert len(sunday_slots) == 5
+        assert sunday_slots[0]["start"] == "09:00"
+        assert sunday_slots[-1]["end"] == "14:00"
+
+
+def test_75_minute_court_slots(
+    tmp_path,
+    monkeypatch,
+):
+    with make_client(
+        tmp_path,
+        monkeypatch,
+    ) as client:
+
+        seed_test_data()
+
         weekday_response = client.get(
             "/api/v1/availability",
             params={
                 "space_id": TENNIS_SPACE_ID,
-                "date": "2026-11-09"
-            }
+                "date": "2026-11-10",
+            },
         )
 
-        assert (
-            weekday_response.status_code
-            == 200
-        )
+        assert weekday_response.status_code == 200
 
         weekday_slots = (
-            weekday_response.json()[
-                "data"
-            ]["slots"]
+            weekday_response.json()["data"]["slots"]
         )
 
-        assert len(
-            weekday_slots
-        ) == 14
+        assert len(weekday_slots) == 11
+        assert weekday_slots[0]["start"] == "07:15"
+        assert weekday_slots[0]["end"] == "08:30"
+        assert weekday_slots[-1]["start"] == "19:45"
+        assert weekday_slots[-1]["end"] == "21:00"
 
-        assert (
-            weekday_slots[0]["start"]
-            == "07:00"
-        )
-
-        assert (
-            weekday_slots[-1]["end"]
-            == "21:00"
-        )
-
-        # Sunday
         sunday_response = client.get(
             "/api/v1/availability",
             params={
                 "space_id": TENNIS_SPACE_ID,
-                "date": "2026-11-15"
-            }
+                "date": "2026-11-15",
+            },
         )
 
-        assert (
-            sunday_response.status_code
-            == 200
-        )
+        assert sunday_response.status_code == 200
 
         sunday_slots = (
-            sunday_response.json()[
-                "data"
-            ]["slots"]
+            sunday_response.json()["data"]["slots"]
         )
 
-        assert len(
-            sunday_slots
-        ) == 5
-
-        assert (
-            sunday_slots[0]["start"]
-            == "09:00"
-        )
-
-        assert (
-            sunday_slots[-1]["end"]
-            == "14:00"
-        )
+        assert len(sunday_slots) == 3
+        assert sunday_slots[0]["start"] == "09:45"
+        assert sunday_slots[-1]["end"] == "13:30"

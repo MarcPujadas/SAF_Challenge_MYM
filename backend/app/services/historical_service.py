@@ -24,7 +24,7 @@ DATA_PATH = (
 #
 # Diumenge:
 # el SAF tanca a les 14:00.
-FITNESS_VALID_SLOTS = {
+STANDARD_75_MINUTE_SLOTS = {
     0: [
         "07:15", "08:30", "09:45", "11:00",
         "12:15", "13:30", "14:45", "16:00",
@@ -51,14 +51,18 @@ FITNESS_VALID_SLOTS = {
         "17:15", "18:30", "19:45"
     ],
     5: [
-        "08:00", "09:30", "11:00",
-        "12:30", "14:00", "15:30",
-        "17:00", "18:30"
+        "08:30", "09:45", "11:00",
+        "12:15", "13:30", "14:45",
+        "16:00", "17:15", "18:30"
     ],
     6: [
-        "09:30", "11:00", "12:30"
-    ]
+        "09:45", "11:00", "12:15"
+    ],
 }
+
+
+# Compatibility with the existing historical service.
+FITNESS_VALID_SLOTS = STANDARD_75_MINUTE_SLOTS
 
 
 def occupancy_level(score):
