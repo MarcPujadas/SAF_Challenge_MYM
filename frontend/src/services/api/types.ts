@@ -64,7 +64,7 @@ export type Recommendation = {
   message: string;
   confidence: Confidence;
   basis: {
-    space: string;
+    space_id: string;
     weekday: string;
     historical_period: string;
   };

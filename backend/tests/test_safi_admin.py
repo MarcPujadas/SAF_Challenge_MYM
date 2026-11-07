@@ -1,16 +1,58 @@
 from unittest.mock import patch
 
+import pandas as pd
 from fastapi.testclient import TestClient
 
 from app import main
 from app.database import database
 from app.routers import safi_admin
+from app.services import historical_service
 from app.services import safi_service
+
+
+FITNESS_SPACE_ID = "sala-fitnes-sala-cardio"
+TENNIS_SPACE_ID = "tennis-tennis-1"
 
 
 def make_client(tmp_path, monkeypatch):
     monkeypatch.setattr(database, "DB_PATH", tmp_path / "test_safhack.db")
     return TestClient(main.app)
+
+
+def historical_records():
+    return pd.DataFrame(
+        [
+            (FITNESS_SPACE_ID, "2026-04-06", 0, "08:30", 10),
+            (FITNESS_SPACE_ID, "2026-04-06", 0, "18:30", 90),
+            (FITNESS_SPACE_ID, "2026-04-13", 0, "08:30", 20),
+            (FITNESS_SPACE_ID, "2026-04-13", 0, "18:30", 100),
+            (FITNESS_SPACE_ID, "2026-04-07", 1, "08:30", 20),
+            (FITNESS_SPACE_ID, "2026-04-07", 1, "18:30", 100),
+            (TENNIS_SPACE_ID, "2026-04-06", 0, "08:30", 1),
+            (TENNIS_SPACE_ID, "2026-04-06", 0, "18:30", 4),
+            (TENNIS_SPACE_ID, "2026-04-07", 1, "08:30", 3),
+            (TENNIS_SPACE_ID, "2026-04-07", 1, "18:30", 2),
+        ],
+        columns=[
+            "space_id",
+            "date",
+            "weekday",
+            "start_time",
+            "reservations",
+        ],
+    )
+
+
+def empty_historical_records():
+    return pd.DataFrame(
+        columns=[
+            "space_id",
+            "date",
+            "weekday",
+            "start_time",
+            "reservations",
+        ]
+    )
 
 
 def seed_space_and_reservation():
@@ -41,6 +83,8 @@ def test_recommendation_uses_historical_service_and_rejects_missing_data(
     tmp_path, monkeypatch
 ):
     with make_client(tmp_path, monkeypatch) as client:
+        seed_space_and_reservation()
+
         response_data = {
             "requested_slot": {
                 "start": "18:30",
@@ -267,6 +311,11 @@ def test_chat_returns_unknown_when_requested_occupancy_has_no_data():
 def test_admin_routes_use_real_schema_and_exclude_cancelled(
     tmp_path, monkeypatch
 ):
+    monkeypatch.setattr(
+        historical_service,
+        "load_historical_data",
+        empty_historical_records,
+    )
     with make_client(tmp_path, monkeypatch) as client:
         seed_space_and_reservation()
 
@@ -289,3 +338,310 @@ def test_admin_routes_use_real_schema_and_exclude_cancelled(
         assert reservations.status_code == 200
         assert len(reservations.json()["data"]) == 1
         assert reservations.json()["data"][0]["reservation_id"] == "res_1"
+
+
+def test_historical_occupancy_by_date_filters_and_scores_per_space_weekday(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        historical_service,
+        "load_historical_data",
+        historical_records,
+    )
+
+    result = historical_service.get_historical_occupancy_by_date(
+        date_from="2026-04-06",
+        date_to="2026-04-07",
+        space_id=FITNESS_SPACE_ID,
+    )
+
+    assert set(result["date"]) == {"2026-04-06", "2026-04-07"}
+    assert set(result["space_id"]) == {FITNESS_SPACE_ID}
+    monday_busy = result[
+        (result["date"] == "2026-04-06")
+        & (result["start_time"] == "18:30")
+    ].iloc[0]
+    monday_quiet = result[
+        (result["date"] == "2026-04-06")
+        & (result["start_time"] == "08:30")
+    ].iloc[0]
+    assert monday_busy["occupancy_score"] > monday_quiet["occupancy_score"]
+    assert monday_busy["occupancy_level"] == "very_high"
+
+
+def test_heatmap_returns_contract_shape_and_applies_filters(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        historical_service,
+        "load_historical_data",
+        historical_records,
+    )
+    with make_client(tmp_path, monkeypatch) as client:
+        response = client.get(
+            "/api/v1/availability/heatmap",
+            params={
+                "space_id": FITNESS_SPACE_ID,
+                "from": "2026-04-06",
+                "to": "2026-04-07",
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["error"] is None
+    assert body["data"]["space_id"] == FITNESS_SPACE_ID
+    days = body["data"]["days"]
+    assert [day["date"] for day in days] == [
+        "2026-04-06",
+        "2026-04-07",
+    ]
+    assert all(
+        set(slot) == {
+            "hour",
+            "occupancy_score",
+            "occupancy_level",
+        }
+        for day in days
+        for slot in day["slots"]
+    )
+    assert {
+        slot["hour"] for day in days for slot in day["slots"]
+    } == {"08:30", "18:30"}
+    monday_slots = {slot["hour"]: slot for slot in days[0]["slots"]}
+    assert monday_slots["18:30"]["occupancy_score"] == 100
+    assert monday_slots["18:30"]["occupancy_level"] == "very_high"
+
+
+def test_heatmap_without_data_returns_empty_days_and_null_space_id(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        historical_service,
+        "load_historical_data",
+        historical_records,
+    )
+    with make_client(tmp_path, monkeypatch) as client:
+        response = client.get(
+            "/api/v1/availability/heatmap",
+            params={
+                "from": "2026-05-01",
+                "to": "2026-05-02",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "space_id": None,
+        "days": [],
+    }
+
+
+def test_heatmap_filters_by_space_and_exact_date(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        historical_service,
+        "load_historical_data",
+        historical_records,
+    )
+    with make_client(tmp_path, monkeypatch) as client:
+        response = client.get(
+            "/api/v1/availability/heatmap",
+            params={
+                "space_id": TENNIS_SPACE_ID,
+                "from": "2026-04-07",
+                "to": "2026-04-07",
+            },
+        )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["space_id"] == TENNIS_SPACE_ID
+    assert [day["date"] for day in data["days"]] == ["2026-04-07"]
+    assert {slot["hour"] for slot in data["days"][0]["slots"]} == {
+        "08:30",
+        "18:30",
+    }
+
+
+def test_heatmap_rejects_invalid_date_and_reversed_range(
+    tmp_path, monkeypatch
+):
+    with make_client(tmp_path, monkeypatch) as client:
+        invalid_date = client.get(
+            "/api/v1/availability/heatmap",
+            params={"from": "2026-02-30"},
+        )
+        reversed_range = client.get(
+            "/api/v1/availability/heatmap",
+            params={
+                "from": "2026-04-08",
+                "to": "2026-04-06",
+            },
+        )
+
+    assert invalid_date.status_code == 400
+    assert invalid_date.json()["error"]["code"] == "INVALID_DATE"
+    assert reversed_range.status_code == 400
+    assert reversed_range.json()["error"]["code"] == "INVALID_DATE_RANGE"
+
+
+def test_admin_occupancy_uses_historical_scores_and_space_filter(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        historical_service,
+        "load_historical_data",
+        historical_records,
+    )
+    with make_client(tmp_path, monkeypatch) as client:
+        response = client.get(
+            "/api/v1/admin/occupancy",
+            params={
+                "from": "2026-04-06",
+                "to": "2026-04-07",
+                "space_id": FITNESS_SPACE_ID,
+            },
+        )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["period"] == {
+        "from": "2026-04-06",
+        "to": "2026-04-07",
+    }
+    assert len(data["spaces"]) == 1
+    space = data["spaces"][0]
+    assert space["space_id"] == FITNESS_SPACE_ID
+    assert space["peak_hour"] == "18:30"
+    assert space["lowest_hour"] == "08:30"
+    assert isinstance(space["average_occupancy_score"], int)
+
+
+def test_admin_occupancy_returns_null_metrics_when_requested_space_has_no_data(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        historical_service,
+        "load_historical_data",
+        historical_records,
+    )
+    with make_client(tmp_path, monkeypatch) as client:
+        response = client.get(
+            "/api/v1/admin/occupancy",
+            params={
+                "from": "2026-05-01",
+                "to": "2026-05-02",
+                "space_id": FITNESS_SPACE_ID,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["spaces"] == [
+        {
+            "space_id": FITNESS_SPACE_ID,
+            "average_occupancy_score": None,
+            "peak_hour": None,
+            "lowest_hour": None,
+        }
+    ]
+
+
+def test_admin_occupancy_rejects_invalid_date_and_reversed_range(
+    tmp_path, monkeypatch
+):
+    with make_client(tmp_path, monkeypatch) as client:
+        invalid_date = client.get(
+            "/api/v1/admin/occupancy",
+            params={"to": "not-a-date"},
+        )
+        reversed_range = client.get(
+            "/api/v1/admin/occupancy",
+            params={
+                "from": "2026-04-08",
+                "to": "2026-04-06",
+            },
+        )
+
+    assert invalid_date.status_code == 400
+    assert invalid_date.json()["error"]["code"] == "INVALID_DATE"
+    assert reversed_range.status_code == 400
+    assert reversed_range.json()["error"]["code"] == "INVALID_DATE_RANGE"
+
+
+def test_admin_stats_uses_real_occupancy_scores_not_app_reservations(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        historical_service,
+        "load_historical_data",
+        historical_records,
+    )
+    with make_client(tmp_path, monkeypatch) as client:
+        seed_space_and_reservation()
+        response = client.get("/api/v1/admin/stats")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["busiest_hour"] == "18:30"
+    assert data["quietest_hour"] == "08:30"
+    assert data["reservations_created_by_app"] == 1
+
+
+def test_admin_stats_does_not_promote_a_rare_single_record_hour(
+    tmp_path, monkeypatch
+):
+    records = historical_records()
+    rare_hour = pd.DataFrame(
+        [
+            (
+                TENNIS_SPACE_ID,
+                "2026-04-06",
+                0,
+                "00:00",
+                1,
+            )
+        ],
+        columns=records.columns,
+    )
+    monkeypatch.setattr(
+        historical_service,
+        "load_historical_data",
+        lambda: pd.concat([records, rare_hour], ignore_index=True),
+    )
+    with make_client(tmp_path, monkeypatch) as client:
+        response = client.get("/api/v1/admin/stats")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["busiest_hour"] == "18:30"
+
+
+def test_admin_stats_returns_null_hours_without_historical_data(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        historical_service,
+        "load_historical_data",
+        empty_historical_records,
+    )
+    with make_client(tmp_path, monkeypatch) as client:
+        response = client.get("/api/v1/admin/stats")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["busiest_hour"] is None
+    assert response.json()["data"]["quietest_hour"] is None
+
+
+def test_analytics_routes_keep_api_v1_prefix():
+    paths = {
+        route.path
+        for route in safi_admin.router.routes
+        if hasattr(route, "path")
+    }
+
+    assert "/api/v1/availability/heatmap" in paths
+    assert "/api/v1/admin/occupancy" in paths
+    assert "/api/v1/admin/stats" in paths
+    assert "/availability/heatmap" not in paths
