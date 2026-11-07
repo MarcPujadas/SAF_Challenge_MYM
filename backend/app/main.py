@@ -11,13 +11,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from app.common import ApiError, error_payload, success
-from app.database.database import get_connection, init_db
+from app.common import (
+    ApiError,
+    error_payload,
+    success,
+)
+from app.database.database import (
+    get_connection,
+    init_db,
+)
+from app.routers.safi_admin import (
+    router as safi_admin_router,
+)
 from app.services.historical_service import (
-    FITNESS_VALID_SLOTS,
+    STANDARD_75_MINUTE_SLOTS,
     get_historical_occupancy,
 )
-from app.routers.safi_admin import router as safi_admin_router
+
 
 GENERAL_OPENING_HOURS = {
     0: ("07:00", "21:00"),  # Monday
@@ -38,37 +48,46 @@ class ReservationCreate(BaseModel):
     end: str
 
 
-def parse_date(value: str) -> date_type:
+def parse_date(
+    value: str,
+) -> date_type:
     try:
         return datetime.strptime(
             value,
-            "%Y-%m-%d"
+            "%Y-%m-%d",
         ).date()
 
     except ValueError as exc:
         raise ApiError(
             "INVALID_DATE",
-            "Date must use YYYY-MM-DD format."
+            "Date must use YYYY-MM-DD format.",
         ) from exc
 
 
-def time_to_minutes(value: str) -> int:
+def time_to_minutes(
+    value: str,
+) -> int:
     try:
         parsed = datetime.strptime(
             value,
-            "%H:%M"
+            "%H:%M",
         )
 
     except ValueError as exc:
         raise ApiError(
             "INVALID_TIME",
-            "Time must use HH:MM 24-hour format."
+            "Time must use HH:MM 24-hour format.",
         ) from exc
 
-    return parsed.hour * 60 + parsed.minute
+    return (
+        parsed.hour * 60
+        + parsed.minute
+    )
 
 
-def minutes_to_time(value: int) -> str:
+def minutes_to_time(
+    value: int,
+) -> str:
     return (
         f"{value // 60:02d}:"
         f"{value % 60:02d}"
@@ -79,7 +98,7 @@ def overlaps(
     start_a: int,
     end_a: int,
     start_b: int,
-    end_b: int
+    end_b: int,
 ) -> bool:
     return (
         start_a < end_b
@@ -87,7 +106,9 @@ def overlaps(
     )
 
 
-def get_space(space_id: str):
+def get_space(
+    space_id: str,
+):
     with get_connection() as connection:
 
         row = connection.execute(
@@ -101,35 +122,83 @@ def get_space(space_id: str):
             FROM spaces
             WHERE id = ?
             """,
-            (space_id,)
+            (
+                space_id,
+            ),
         ).fetchone()
 
     if row is None:
         raise ApiError(
             "INVALID_SPACE",
-            "The requested space does not exist.",
-            404
+            (
+                "The requested space "
+                "does not exist."
+            ),
+            404,
         )
 
     return row
 
 
+def uses_75_minute_slots(
+    space_id: str,
+) -> bool:
+    """
+    Spaces whose historical SAF data shows
+    a standard 75-minute reservation pattern.
+    """
+
+    return (
+        space_id
+        == "sala-fitnes-sala-cardio"
+
+        or space_id.startswith(
+            "pistes-de-padel-pista-"
+        )
+
+        or space_id.startswith(
+            "tennis-tennis-"
+        )
+
+        or space_id.startswith(
+            "esquaix-esquaix-"
+        )
+    )
+
+
 def build_slots(
+    space_id: str,
     space_type: str,
-    weekday: int
+    weekday: int,
 ) -> list[tuple[int, int]]:
+    """
+    Build valid reservation slots.
 
-    if space_type == "fitness":
+    Fitness, padel, tennis and squash
+    use the real 75-minute SAF pattern.
 
-        valid_slots = FITNESS_VALID_SLOTS.get(
-            weekday,
-            []
+    Other spaces currently use 60-minute
+    slots inside the official SAF
+    opening hours.
+    """
+
+    if uses_75_minute_slots(
+        space_id
+    ):
+        valid_slots = (
+            STANDARD_75_MINUTE_SLOTS.get(
+                weekday,
+                [],
+            )
         )
 
         return [
             (
                 time_to_minutes(start),
-                time_to_minutes(start) + 75
+                (
+                    time_to_minutes(start)
+                    + 75
+                ),
             )
             for start in valid_slots
         ]
@@ -143,12 +212,16 @@ def build_slots(
     if opening_hours is None:
         return []
 
-    opening_time = time_to_minutes(
-        opening_hours[0]
+    opening_time = (
+        time_to_minutes(
+            opening_hours[0]
+        )
     )
 
-    closing_time = time_to_minutes(
-        opening_hours[1]
+    closing_time = (
+        time_to_minutes(
+            opening_hours[1]
+        )
     )
 
     duration = 60
@@ -164,7 +237,7 @@ def build_slots(
         slots.append(
             (
                 start,
-                start + duration
+                start + duration,
             )
         )
 
@@ -174,41 +247,63 @@ def build_slots(
 
 
 def validate_reservation_slot(
+    space_id: str,
     space_type: str,
     reservation_date: date_type,
     start: str,
-    end: str
+    end: str,
 ):
-    start_minutes = time_to_minutes(start)
-    end_minutes = time_to_minutes(end)
+    start_minutes = (
+        time_to_minutes(
+            start
+        )
+    )
+
+    end_minutes = (
+        time_to_minutes(
+            end
+        )
+    )
 
     if end_minutes <= start_minutes:
         raise ApiError(
             "INVALID_TIME",
-            "Reservation end must be after start."
+            (
+                "Reservation end must "
+                "be after start."
+            ),
         )
 
-    weekday = reservation_date.weekday()
+    weekday = (
+        reservation_date.weekday()
+    )
 
     valid_slots = build_slots(
+        space_id,
         space_type,
-        weekday
+        weekday,
     )
 
     requested_slot = (
         start_minutes,
-        end_minutes
+        end_minutes,
     )
 
     if requested_slot not in valid_slots:
         raise ApiError(
             "INVALID_TIME",
-            "The requested time does not match a valid reservation slot."
+            (
+                "The requested time does "
+                "not match a valid "
+                "reservation slot."
+            ),
         )
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(
+    _: FastAPI,
+):
     init_db()
 
     yield
@@ -217,7 +312,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="SAF Hack API",
     version="0.1.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 
@@ -226,37 +321,46 @@ app.add_middleware(
     allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["*"],
-    allow_headers=["*"]
+    allow_headers=["*"],
 )
 
-app.include_router(safi_admin_router)
+
+app.include_router(
+    safi_admin_router
+)
 
 
-@app.exception_handler(ApiError)
+@app.exception_handler(
+    ApiError
+)
 async def api_error_handler(
     _: Request,
-    exc: ApiError
+    exc: ApiError,
 ):
     return JSONResponse(
-        status_code=exc.status_code,
+        status_code=(
+            exc.status_code
+        ),
         content=error_payload(
             exc.code,
-            exc.message
-        )
+            exc.message,
+        ),
     )
 
 
-@app.exception_handler(RequestValidationError)
+@app.exception_handler(
+    RequestValidationError
+)
 async def validation_error_handler(
     _: Request,
-    __: RequestValidationError
+    __: RequestValidationError,
 ):
     return JSONResponse(
         status_code=422,
         content=error_payload(
             "INVALID_REQUEST",
-            "Invalid request payload."
-        )
+            "Invalid request payload.",
+        ),
     )
 
 
@@ -265,7 +369,7 @@ def root():
     return success(
         {
             "name": "SAF Hack API",
-            "status": "running"
+            "status": "running",
         }
     )
 
@@ -274,24 +378,27 @@ def root():
 def health():
     return success(
         {
-            "status": "ok"
+            "status": "ok",
         }
     )
 
 
-@app.get("/api/v1/users/me")
+@app.get(
+    "/api/v1/users/me"
+)
 def current_user():
     return success(
         {
             "id": "demo-user",
-            "name": "Usuari Demo"
+            "name": "Usuari Demo",
         }
     )
 
 
-@app.get("/api/v1/spaces")
+@app.get(
+    "/api/v1/spaces"
+)
 def list_spaces():
-
     with get_connection() as connection:
 
         rows = connection.execute(
@@ -313,19 +420,22 @@ def list_spaces():
                 "id": row["id"],
                 "name": row["name"],
                 "type": row["type"],
-                "capacity": row["capacity"],
+                "capacity": (
+                    row["capacity"]
+                ),
                 "reservable": bool(
                     row["reservable"]
-                )
+                ),
             }
             for row in rows
         ]
     )
 
 
-@app.get("/api/v1/services")
+@app.get(
+    "/api/v1/services"
+)
 def list_services():
-
     with get_connection() as connection:
 
         rows = connection.execute(
@@ -346,52 +456,73 @@ def list_services():
             {
                 "id": row["id"],
                 "name": row["name"],
-                "description": row["description"],
-                "space_id": row["space_id"],
+                "description": (
+                    row["description"]
+                ),
+                "space_id": (
+                    row["space_id"]
+                ),
                 "reservable": bool(
                     row["reservable"]
-                )
+                ),
             }
             for row in rows
         ]
     )
 
 
-@app.get("/api/v1/availability")
+@app.get(
+    "/api/v1/availability"
+)
 def availability(
     space_id: str = Query(...),
-    date: str = Query(...)
+    date: str = Query(...),
 ):
-    requested_date = parse_date(date)
+    requested_date = (
+        parse_date(
+            date
+        )
+    )
 
-    weekday = requested_date.weekday()
+    weekday = (
+        requested_date.weekday()
+    )
 
-    space = get_space(space_id)
+    space = get_space(
+        space_id
+    )
 
-    if not bool(space["reservable"]):
+    if not bool(
+        space["reservable"]
+    ):
         raise ApiError(
             "INVALID_SPACE",
-            "This space is not reservable."
+            (
+                "This space is "
+                "not reservable."
+            ),
         )
 
     with get_connection() as connection:
 
-        reservations = connection.execute(
-            """
-            SELECT
-                start,
-                end
-            FROM reservations
-            WHERE
-                space_id = ?
-                AND date = ?
-                AND status = 'confirmed'
-            """,
-            (
-                space_id,
-                date
-            )
-        ).fetchall()
+        reservations = (
+            connection.execute(
+                """
+                SELECT
+                    start,
+                    end
+                FROM reservations
+                WHERE
+                    space_id = ?
+                    AND date = ?
+                    AND status = 'confirmed'
+                """,
+                (
+                    space_id,
+                    date,
+                ),
+            ).fetchall()
+        )
 
     reservation_intervals = [
         (
@@ -400,7 +531,7 @@ def availability(
             ),
             time_to_minutes(
                 row["end"]
-            )
+            ),
         )
         for row in reservations
     ]
@@ -408,45 +539,63 @@ def availability(
     slots = []
 
     for start, end in build_slots(
+        space["id"],
         space["type"],
-        weekday
+        weekday,
     ):
-        start_string = minutes_to_time(start)
-        end_string = minutes_to_time(end)
+        start_string = (
+            minutes_to_time(
+                start
+            )
+        )
+
+        end_string = (
+            minutes_to_time(
+                end
+            )
+        )
 
         reservations_in_slot = sum(
             overlaps(
                 start,
                 end,
                 reserved_start,
-                reserved_end
+                reserved_end,
             )
             for (
                 reserved_start,
-                reserved_end
-            ) in reservation_intervals
+                reserved_end,
+            )
+            in reservation_intervals
         )
 
         remaining_capacity = max(
-            space["capacity"]
-            - reservations_in_slot,
-            0
+            (
+                space["capacity"]
+                - reservations_in_slot
+            ),
+            0,
         )
 
         historical = (
             get_historical_occupancy(
                 space_id=space_id,
                 weekday=weekday,
-                start_time=start_string
+                start_time=start_string,
             )
         )
 
         slots.append(
             {
-                "start": start_string,
-                "end": end_string,
+                "start": (
+                    start_string
+                ),
+                "end": (
+                    end_string
+                ),
                 "available": (
-                    remaining_capacity > 0
+                    remaining_capacity
+                    > 0
                 ),
                 "remaining_capacity": (
                     remaining_capacity
@@ -460,50 +609,72 @@ def availability(
                     historical[
                         "occupancy_score"
                     ]
-                )
+                ),
             }
         )
 
     return success(
         {
-            "space_id": space_id,
-            "date": date,
-            "slots": slots
+            "space_id": (
+                space_id
+            ),
+            "date": (
+                date
+            ),
+            "slots": (
+                slots
+            ),
         }
     )
 
 
-@app.post("/api/v1/reservations")
+@app.post(
+    "/api/v1/reservations"
+)
 def create_reservation(
-    payload: ReservationCreate
+    payload: ReservationCreate,
 ):
-    reservation_date = parse_date(
-        payload.date
+    reservation_date = (
+        parse_date(
+            payload.date
+        )
     )
 
     space = get_space(
         payload.space_id
     )
 
-    if not bool(space["reservable"]):
+    if not bool(
+        space["reservable"]
+    ):
         raise ApiError(
             "INVALID_SPACE",
-            "This space is not reservable."
+            (
+                "This space is "
+                "not reservable."
+            ),
         )
 
     validate_reservation_slot(
+        space_id=space["id"],
         space_type=space["type"],
-        reservation_date=reservation_date,
+        reservation_date=(
+            reservation_date
+        ),
         start=payload.start,
-        end=payload.end
+        end=payload.end,
     )
 
-    start = time_to_minutes(
-        payload.start
+    start = (
+        time_to_minutes(
+            payload.start
+        )
     )
 
-    end = time_to_minutes(
-        payload.end
+    end = (
+        time_to_minutes(
+            payload.end
+        )
     )
 
     with get_connection() as connection:
@@ -516,14 +687,17 @@ def create_reservation(
             """,
             (
                 payload.user_id,
-            )
+            ),
         ).fetchone()
 
         if user is None:
             raise ApiError(
                 "INVALID_USER",
-                "The requested user does not exist.",
-                404
+                (
+                    "The requested user "
+                    "does not exist."
+                ),
+                404,
             )
 
         existing_user_reservations = (
@@ -540,8 +714,8 @@ def create_reservation(
                 """,
                 (
                     payload.user_id,
-                    payload.date
-                )
+                    payload.date,
+                ),
             ).fetchall()
         )
 
@@ -556,16 +730,16 @@ def create_reservation(
                 ),
                 time_to_minutes(
                     reservation["end"]
-                )
+                ),
             ):
                 raise ApiError(
                     "RESERVATION_CONFLICT",
                     (
-                        "The user already has "
-                        "a reservation during "
-                        "this time."
+                        "The user already "
+                        "has a reservation "
+                        "during this time."
                     ),
-                    409
+                    409,
                 )
 
         existing_space_reservations = (
@@ -582,8 +756,8 @@ def create_reservation(
                 """,
                 (
                     payload.space_id,
-                    payload.date
-                )
+                    payload.date,
+                ),
             ).fetchall()
         )
 
@@ -596,20 +770,24 @@ def create_reservation(
                 ),
                 time_to_minutes(
                     reservation["end"]
-                )
+                ),
             )
             for reservation
             in existing_space_reservations
         )
 
-        if concurrent >= space["capacity"]:
+        if (
+            concurrent
+            >= space["capacity"]
+        ):
             raise ApiError(
                 "SLOT_NOT_AVAILABLE",
                 (
-                    "The requested time slot "
-                    "has no remaining capacity."
+                    "The requested time "
+                    "slot has no remaining "
+                    "capacity."
                 ),
-                409
+                409,
             )
 
         reservation_id = (
@@ -627,7 +805,10 @@ def create_reservation(
                 end,
                 status
             )
-            VALUES (?, ?, ?, ?, ?, ?, 'confirmed')
+            VALUES (
+                ?, ?, ?, ?, ?, ?,
+                'confirmed'
+            )
             """,
             (
                 reservation_id,
@@ -635,26 +816,40 @@ def create_reservation(
                 payload.space_id,
                 payload.date,
                 payload.start,
-                payload.end
-            )
+                payload.end,
+            ),
         )
 
     return success(
         {
-            "reservation_id": reservation_id,
+            "reservation_id": (
+                reservation_id
+            ),
             "status": "confirmed",
-            "user_id": payload.user_id,
-            "space_id": payload.space_id,
-            "date": payload.date,
-            "start": payload.start,
-            "end": payload.end
+            "user_id": (
+                payload.user_id
+            ),
+            "space_id": (
+                payload.space_id
+            ),
+            "date": (
+                payload.date
+            ),
+            "start": (
+                payload.start
+            ),
+            "end": (
+                payload.end
+            ),
         }
     )
 
 
-@app.get("/api/v1/reservations")
+@app.get(
+    "/api/v1/reservations"
+)
 def list_reservations(
-    user_id: str = Query(...)
+    user_id: str = Query(...),
 ):
     with get_connection() as connection:
 
@@ -678,7 +873,7 @@ def list_reservations(
             """,
             (
                 user_id,
-            )
+            ),
         ).fetchall()
 
     return success(
@@ -689,37 +884,51 @@ def list_reservations(
     )
 
 
-@app.delete("/api/v1/reservations/{reservation_id}")
+@app.delete(
+    "/api/v1/reservations/{reservation_id}"
+)
 def cancel_reservation(
-    reservation_id: str
+    reservation_id: str,
 ):
     with get_connection() as connection:
 
-        reservation = connection.execute(
-            """
-            SELECT
-                id,
-                status
-            FROM reservations
-            WHERE id = ?
-            """,
-            (
-                reservation_id,
-            )
-        ).fetchone()
+        reservation = (
+            connection.execute(
+                """
+                SELECT
+                    id,
+                    status
+                FROM reservations
+                WHERE id = ?
+                """,
+                (
+                    reservation_id,
+                ),
+            ).fetchone()
+        )
 
         if reservation is None:
             raise ApiError(
                 "RESERVATION_NOT_FOUND",
-                "The requested reservation does not exist.",
-                404
+                (
+                    "The requested "
+                    "reservation does "
+                    "not exist."
+                ),
+                404,
             )
 
-        if reservation["status"] == "cancelled":
+        if (
+            reservation["status"]
+            == "cancelled"
+        ):
             raise ApiError(
                 "RESERVATION_ALREADY_CANCELLED",
-                "The reservation is already cancelled.",
-                409
+                (
+                    "The reservation is "
+                    "already cancelled."
+                ),
+                409,
             )
 
         connection.execute(
@@ -730,12 +939,14 @@ def cancel_reservation(
             """,
             (
                 reservation_id,
-            )
+            ),
         )
 
     return success(
         {
-            "reservation_id": reservation_id,
-            "status": "cancelled"
+            "reservation_id": (
+                reservation_id
+            ),
+            "status": "cancelled",
         }
     )
