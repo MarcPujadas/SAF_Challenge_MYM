@@ -6,6 +6,7 @@ import HomeScreen from '../screens/HomeScreen';
 import MevesReservesScreen from '../screens/MevesReservesScreen';
 import ReservaScreen from '../screens/ReservaScreen';
 import SafiChatScreen from '../screens/SafiChatScreen';
+import ServeisScreen from '../screens/ServeisScreen';
 import type { RootStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -22,6 +23,7 @@ export default function RootNavigator() {
         options={{ title: 'Les meves reserves' }}
       />
       <Stack.Screen name="SafiChat" component={SafiChatScreen} options={{ title: 'SAFi' }} />
+      <Stack.Screen name="Serveis" component={ServeisScreen} options={{ title: 'Serveis' }} />
       <Stack.Screen name="Heatmap" component={HeatmapScreen} options={{ title: 'Disponibilitat' }} />
     </Stack.Navigator>
   );
