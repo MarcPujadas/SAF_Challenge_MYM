@@ -83,10 +83,43 @@ def get_space_type(name):
     return "other"
 
 
+def build_space_id(
+    espai,
+    subespai
+):
+    espai_id = slugify(
+        espai
+    )
+
+    if not subespai:
+        return espai_id
+
+    subespai_id = slugify(
+        subespai
+    )
+
+    # Al full Espais apareix "camps 3",
+    # mentre que a les reserves històriques
+    # el recurs correspon clarament a "camp 3".
+    #
+    # Normalitzem només l'identificador.
+    # No modifiquem el nom original del dataset.
+    if (
+        espai_id == "futbol-7"
+        and subespai_id == "camps-3"
+    ):
+        subespai_id = "camp-3"
+
+    return (
+        f"{espai_id}-{subespai_id}"
+    )
+
+
 def main():
     if not DATA_PATH.exists():
         raise FileNotFoundError(
-            f"No s'ha trobat el dataset: {DATA_PATH}"
+            f"No s'ha trobat el dataset: "
+            f"{DATA_PATH}"
         )
 
     init_db()
@@ -120,12 +153,16 @@ def main():
     ]
 
     if not duplicates.empty:
-        print("DUPLICATS DETECTATS:")
+        print(
+            "DUPLICATS DETECTATS:"
+        )
+
         print(
             duplicates.to_string(
                 index=False
             )
         )
+
         print()
 
     df = df.drop_duplicates()
@@ -153,20 +190,16 @@ def main():
                 row["Aforament"]
             )
 
-            if subespai:
-                space_id = slugify(
-                    f"{espai}-{subespai}"
-                )
+            space_id = build_space_id(
+                espai,
+                subespai
+            )
 
+            if subespai:
                 name = (
                     f"{espai} - {subespai}"
                 )
-
             else:
-                space_id = slugify(
-                    espai
-                )
-
                 name = espai
 
             space_type = get_space_type(
@@ -208,6 +241,7 @@ def main():
             )
 
     print()
+
     print(
         f"Importació completada: "
         f"{imported} espais."
