@@ -107,9 +107,9 @@ export async function postRecommendations(req: RecommendationRequest): Promise<R
     message: 'Les 19:00 acostumen a tenir menys ocupació que les 18:00.',
     confidence: 'medium',
     basis: {
-      space: SPACE_NAMES[req.space_id],
+      space_id: req.space_id,
       weekday: 'Tuesday',
-      historical_period: 'comparable recent months',
+      historical_period: '2026-04-01 to 2026-10-31',
     },
   };
 }

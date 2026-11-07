@@ -236,9 +236,9 @@ Demana al backend les millors opcions per a una reserva.
     "message": "Les 19:00 acostumen a tenir menys ocupació que les 18:00.",
     "confidence": "medium",
     "basis": {
-      "space": "Sala Fitness",
+      "space_id": "sala-fitnes-sala-cardio",
       "weekday": "Tuesday",
-      "historical_period": "comparable recent months"
+      "historical_period": "2026-04-01 to 2026-10-31"
     }
   },
   "error": null
