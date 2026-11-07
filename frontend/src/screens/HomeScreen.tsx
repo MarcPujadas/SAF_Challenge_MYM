@@ -12,6 +12,18 @@ export default function HomeScreen({ navigation }: Props) {
       <Pressable style={styles.button} onPress={() => navigation.navigate('Reserva')}>
         <Text style={styles.buttonText}>RESERVAR</Text>
       </Pressable>
+      <Pressable style={styles.secondary} onPress={() => navigation.navigate('MevesReserves')}>
+        <Text style={styles.secondaryText}>Les meves reserves</Text>
+      </Pressable>
+      <Pressable style={styles.secondary} onPress={() => navigation.navigate('SafiChat')}>
+        <Text style={styles.secondaryText}>SAFi</Text>
+      </Pressable>
+      <Pressable style={styles.secondary} onPress={() => navigation.navigate('Serveis')}>
+        <Text style={styles.secondaryText}>Serveis</Text>
+      </Pressable>
+      <Pressable style={styles.secondary} onPress={() => navigation.navigate('Heatmap')}>
+        <Text style={styles.secondaryText}>Disponibilitat</Text>
+      </Pressable>
     </View>
   );
 }
@@ -27,4 +39,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   buttonText: { color: '#fff', fontSize: 28, fontWeight: 'bold' },
+  secondary: {
+    width: '100%',
+    marginTop: 16,
+    paddingVertical: 16,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#1565c0',
+    alignItems: 'center',
+  },
+  secondaryText: { color: '#1565c0', fontSize: 20, fontWeight: 'bold' },
 });
