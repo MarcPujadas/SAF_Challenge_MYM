@@ -810,7 +810,11 @@ El LLM no ha d'inventar:
 
 Si el backend no té prou dades, SAFi ha d'indicar que no ho sap.
 
-La implementació dels endpoints de SAFi correspon a la branca de backend SAFi/Admin.
+Endpoints disponibles:
+
+- `POST /api/v1/safi/advice`
+- `POST /api/v1/safi/chat`
+- `POST /api/v1/recommendations`
 
 ---
 
@@ -828,7 +832,12 @@ Les funcionalitats administratives previstes inclouen:
 - heatmaps,
 - consulta de reserves.
 
-La implementació dels endpoints d'administració correspon a la branca SAFi/Admin.
+Endpoints disponibles:
+
+- `GET /api/v1/admin/summary`
+- `GET /api/v1/admin/stats`
+- `GET /api/v1/admin/reservations`
+- `GET /api/v1/admin/occupancy`
 
 ---
 
@@ -976,21 +985,20 @@ Implementat:
 ✓ Occupancy score
 ✓ Occupancy level
 ✓ Recommendation service
+✓ API de recomanacions
+✓ Endpoints SAFi
+✓ Endpoints d'administració
 ✓ Tests automatitzats
 ✓ Setup reproductible
 ```
 
-Pendent d'altres branques:
+Pendent:
 
 ```text
-○ POST /api/v1/recommendations
-○ POST /api/v1/safi/advice
-○ POST /api/v1/safi/chat
 ○ GET /api/v1/availability/heatmap
-○ endpoints /api/v1/admin/*
 ```
 
-Aquestes funcionalitats utilitzaran el Backend Core existent en lloc de crear una segona base de dades o un backend independent.
+Els endpoints de recomanacions, SAFi i administració utilitzen el Backend Core existent en lloc de crear una segona base de dades o un backend independent.
 
 ---
 
