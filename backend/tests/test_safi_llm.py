@@ -297,6 +297,23 @@ def test_ornith_adapter_uses_configured_key_and_chat_completion_protocol(
     assert kwargs["timeout"] == 30.0
 
 
+def test_forecast_tool_rejects_court_services_without_historical_lookup():
+    with patch.object(llm_service, "get_historical_occupancy") as historical:
+        result = llm_service.execute_tool(
+            "get_occupancy_forecast",
+            {
+                "service": "padel",
+                "date": "2026-11-10",
+                "start": "18:30",
+            },
+            "demo-user",
+        )
+
+    assert result["available"] is False
+    assert "not available" in result["reason"]
+    historical.assert_not_called()
+
+
 def test_availability_tool_uses_shared_valid_slot_service():
     with patch.object(
         llm_service,

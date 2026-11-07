@@ -449,15 +449,17 @@ def test_safi_impact_without_actions_or_valid_scores_has_null_rates(
     ]
 
 
-def test_analytics_routes_use_api_prefix():
-    paths = {
-        route.path
-        for route in main.app.routes
-        if hasattr(route, "path")
-    }
-    assert "/api/v1/admin/analytics/occupancy-by-weekday" in paths
-    assert "/api/v1/admin/analytics/occupancy-slots" in paths
-    assert "/api/v1/admin/analytics/utilization" in paths
-    assert "/api/v1/admin/analytics/occupancy-trend" in paths
-    assert "/api/v1/admin/analytics/cancellations" in paths
-    assert "/api/v1/admin/analytics/safi-impact" in paths
+def test_analytics_routes_use_api_prefix(tmp_path, monkeypatch):
+    with make_client(tmp_path, monkeypatch) as client:
+        paths = [
+            "/api/v1/admin/analytics/occupancy-by-weekday",
+            "/api/v1/admin/analytics/occupancy-slots",
+            "/api/v1/admin/analytics/utilization",
+            "/api/v1/admin/analytics/occupancy-trend",
+            "/api/v1/admin/analytics/cancellations",
+            "/api/v1/admin/analytics/safi-impact",
+        ]
+        for path in paths:
+            response = client.get(path)
+            assert response.status_code != 404, path
+

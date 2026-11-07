@@ -3,11 +3,18 @@ import { USE_MOCKS } from './config';
 import * as mocks from './mocks';
 import type {
   Availability,
+  AvailabilityWeek,
+  Heatmap,
   Recommendation,
+  RecommendationAction,
+  RecommendationActionType,
   RecommendationRequest,
+  ReservationCancelled,
   ReservationCreated,
   ReservationItem,
   ReservationRequest,
+  SafiChatRequest,
+  SafiChatResponse,
   Service,
 } from './types';
 
@@ -24,10 +31,44 @@ export function getAvailability(spaceId: string, date: string): Promise<Availabi
     : request<Availability>('GET', '/availability', { query: { space_id: spaceId, date } });
 }
 
+// PROVISIONAL, pendent de contracts.md: GET /availability/week (tasques_v3.md 4.3).
+export function getAvailabilityWeek(
+  spaceId: string,
+  from: string,
+  to: string,
+): Promise<AvailabilityWeek> {
+  return USE_MOCKS
+    ? mocks.getAvailabilityWeek(spaceId, from, to)
+    : request<AvailabilityWeek>('GET', '/availability/week', {
+        query: { space_id: spaceId, from, to },
+      });
+}
+
 export function postRecommendations(req: RecommendationRequest): Promise<Recommendation> {
   return USE_MOCKS
     ? mocks.postRecommendations(req)
     : request<Recommendation>('POST', '/recommendations', { body: req });
+}
+
+export function postRecommendationAction(
+  recommendationId: string,
+  action: RecommendationActionType,
+): Promise<RecommendationAction> {
+  return USE_MOCKS
+    ? mocks.postRecommendationAction(recommendationId, action)
+    : request<RecommendationAction>(
+        'POST',
+        `/recommendations/${encodeURIComponent(recommendationId)}/action`,
+        { body: { action } },
+      );
+}
+
+export function getHeatmap(spaceId: string, from: string, to: string): Promise<Heatmap> {
+  return USE_MOCKS
+    ? mocks.getHeatmap(spaceId, from, to)
+    : request<Heatmap>('GET', '/availability/heatmap', {
+        query: { space_id: spaceId, from, to },
+      });
 }
 
 export function createReservation(
@@ -39,10 +80,40 @@ export function createReservation(
     : request<ReservationCreated>('POST', '/reservations', { body });
 }
 
-export function getReservations(userId: string = DEFAULT_USER_ID): Promise<ReservationItem[]> {
+export function getReservations(
+  userId: string = DEFAULT_USER_ID,
+  includeCancelled = false,
+): Promise<ReservationItem[]> {
   return USE_MOCKS
-    ? mocks.getReservations(userId)
-    : request<ReservationItem[]>('GET', '/reservations', { query: { user_id: userId } });
+    ? mocks.getReservations(userId, includeCancelled)
+    : request<ReservationItem[]>('GET', '/reservations', {
+        query: {
+          user_id: userId,
+          include_cancelled: includeCancelled ? 'true' : 'false',
+        },
+      });
+}
+
+export function cancelReservation(reservationId: string): Promise<ReservationCancelled> {
+  return USE_MOCKS
+    ? mocks.cancelReservation(reservationId)
+    : request<ReservationCancelled>('DELETE', `/reservations/${encodeURIComponent(reservationId)}`);
+}
+
+export async function chatSafi(
+  message: string,
+  userId: string = DEFAULT_USER_ID,
+): Promise<SafiChatResponse> {
+  const body: SafiChatRequest = { user_id: userId, message };
+  if (USE_MOCKS) return mocks.chatSafi(body);
+
+  try {
+    return await request<SafiChatResponse>('POST', '/safi/chat-llm', { body });
+  } catch {
+    // Demo-safe fallback: if Ornith is unavailable or returns an invalid response,
+    // keep SAFi usable through the deterministic backend.
+    return request<SafiChatResponse>('POST', '/safi/chat', { body });
+  }
 }
 
 export { ApiError } from './client';

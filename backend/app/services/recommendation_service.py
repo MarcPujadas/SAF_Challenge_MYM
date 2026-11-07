@@ -47,29 +47,42 @@ def build_message(
 ):
     if requested["occupancy_level"] == "unknown":
         return (
-            "No hi ha prou dades per estimar "
-            "l'ocupació d'aquesta franja."
+            "No tenim prou dades històriques d'aquesta franja "
+            "per fer una previsió fiable."
         )
 
-    if alternative is None:
-        return (
-            "No s'ha trobat una alternativa millor "
-            "amb les dades disponibles."
-        )
+    level_labels = {
+        "low": "baixa",
+        "medium": "mitjana",
+        "high": "alta",
+        "very_high": "molt alta",
+        "unknown": "desconeguda",
+    }
 
-    if (
-        alternative["occupancy_score"]
-        >= requested["occupancy_score"]
+    requested_level = level_labels[requested["occupancy_level"]]
+    requested_score = requested["occupancy_score"]
+    requested_start = requested["start_time"]
+
+    if alternative is None or (
+        alternative["occupancy_score"] >= requested_score
     ):
+        if requested["occupancy_level"] == "low":
+            return (
+                f"És una bona franja: a les {requested_start} "
+                f"l'ocupació acostuma a ser baixa ({requested_score}/100)."
+            )
+
         return (
-            "No s'ha trobat una franja propera "
-            "amb menys ocupació."
+            f"A les {requested_start} l'ocupació acostuma a ser "
+            f"{requested_level} ({requested_score}/100). "
+            "No he trobat cap franja propera clarament millor."
         )
 
     return (
-        f"Les {alternative['start']} acostumen "
-        f"a tenir menys ocupació que les "
-        f"{requested['start_time']}."
+        f"A les {requested_start} acostuma a haver-hi una ocupació "
+        f"{requested_level}. Si pots, et recomano les {alternative['start']}, "
+        f"que acostumen a estar més tranquil·les "
+        f"({alternative['occupancy_score']}/100 vs {requested_score}/100)."
     )
 
 

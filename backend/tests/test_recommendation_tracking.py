@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 
 from app import main
@@ -132,6 +134,79 @@ def test_recommendation_is_persisted(
         assert row["recommended_start"] == "19:45"
         assert row["requested_score"] == 80
         assert row["recommended_score"] == 40
+
+
+def test_court_space_cannot_receive_safi_recommendation(
+    tmp_path,
+    monkeypatch,
+):
+    with make_client(tmp_path, monkeypatch) as client:
+        with database.get_connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO spaces (
+                    id, name, type, capacity, reservable
+                )
+                VALUES (?, ?, 'court', 1, 1)
+                """,
+                ("test-court", "Test court"),
+            )
+
+        with patch.object(recommendations, "recommend") as recommend_mock:
+            response = client.post(
+                "/api/v1/recommendations",
+                json={
+                    "space_id": "test-court",
+                    "date": "2026-11-10",
+                    "preferred_start": "18:30",
+                    "preferred_end": "19:45",
+                },
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["success"] is True
+        assert body["error"] is None
+        assert body["data"]["recommendation_id"] is None
+        assert body["data"]["requested_slot"] == {
+            "start": "18:30",
+            "occupancy_score": None,
+            "occupancy_level": "unknown",
+        }
+        assert body["data"]["recommended_slot"] is None
+        assert body["data"]["recommendation_available"] is False
+        assert (
+            body["data"]["unavailable_reason"]
+            == "unsupported_space_type"
+        )
+        assert body["data"]["basis"]["historical_period"] is None
+        recommend_mock.assert_not_called()
+
+        with database.get_connection() as connection:
+            stored = connection.execute(
+                "SELECT COUNT(*) AS count FROM recommendations"
+            ).fetchone()
+
+        assert stored["count"] == 0
+
+
+def test_nonexistent_space_still_returns_invalid_space(
+    tmp_path,
+    monkeypatch,
+):
+    with make_client(tmp_path, monkeypatch) as client:
+        response = client.post(
+            "/api/v1/recommendations",
+            json={
+                "space_id": "missing-space",
+                "date": "2026-11-10",
+                "preferred_start": "18:30",
+                "preferred_end": "19:45",
+            },
+        )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "INVALID_SPACE"
 
 
 def test_recommendation_action_is_saved(

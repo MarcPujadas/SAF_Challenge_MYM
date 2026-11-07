@@ -399,10 +399,21 @@ def get_historical_occupancy(
         space_data["start_time"].unique()
     )
 
-    actual_slot = find_nearest_slot(
-        start_time,
-        valid_slots
-    )
+    # Per a prediccions/recomanacions no inventem una franja equivalent:
+    # si l'hora demanada no existeix exactament a l'historic, retornem unknown.
+    if start_time not in valid_slots:
+        return {
+            "space_id": space_id,
+            "weekday": weekday,
+            "requested_start": start_time,
+            "start_time": None,
+            "occupancy_score": None,
+            "occupancy_level": "unknown",
+            "average_reservations": None,
+            "samples": 0
+        }
+
+    actual_slot = start_time
 
     statistics = calculate_slot_statistics(
         space_data

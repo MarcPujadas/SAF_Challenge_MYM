@@ -11,7 +11,17 @@ export function errorMessage(err: unknown): string {
       case 'INVALID_TIME':
         return 'L\'hora escollida no és vàlida.';
       case 'RESERVATION_CONFLICT':
-        return 'Ja hi ha una reserva en aquesta franja.';
+        return 'Ja tens una reserva que coincideix amb aquesta franja.';
+      case 'INVALID_DATE':
+        return 'La data escollida no és vàlida.';
+      case 'INVALID_DATE_RANGE':
+        return 'El rang de dates no és vàlid.';
+      case 'OCCUPANCY_DATA_UNAVAILABLE':
+        return 'No tenim prou dades històriques d’aquesta franja per fer una previsió fiable.';
+      case 'RESERVATION_NOT_FOUND':
+        return 'Aquesta reserva no existeix.';
+      case 'RESERVATION_ALREADY_CANCELLED':
+        return 'Aquesta reserva ja estava cancel·lada.';
       case 'NETWORK_ERROR':
         return 'No hi ha connexió amb el servidor. Torna-ho a provar.';
     }

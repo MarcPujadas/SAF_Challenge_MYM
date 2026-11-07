@@ -126,6 +126,10 @@ def get_occupancy_forecast(
     service = _service(service_id)
     if service is None:
         return _unavailable("Unsupported service.")
+    if not service.safi_recommendations:
+        return _unavailable(
+            "SAFi occupancy recommendations are not available for this space type."
+        )
     requested_date = parse_date(date_value)
     weekday = requested_date.weekday()
     result: dict[str, Any] = {
