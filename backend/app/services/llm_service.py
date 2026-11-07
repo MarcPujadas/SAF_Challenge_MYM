@@ -8,7 +8,6 @@ from typing import Any
 import httpx
 
 from app.common import ApiError
-from app.services.catalog_service import supports_safi_recommendations
 from app.config.services import SERVICE_BY_ID
 from app.services.availability_service import get_slot_availability
 from app.services.historical_service import (
@@ -127,7 +126,7 @@ def get_occupancy_forecast(
     service = _service(service_id)
     if service is None:
         return _unavailable("Unsupported service.")
-    if not supports_safi_recommendations(service.space_id):
+    if not service.safi_recommendations:
         return _unavailable(
             "SAFi occupancy recommendations are not available for this space type."
         )
