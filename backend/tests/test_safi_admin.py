@@ -83,6 +83,8 @@ def test_recommendation_uses_historical_service_and_rejects_missing_data(
     tmp_path, monkeypatch
 ):
     with make_client(tmp_path, monkeypatch) as client:
+        seed_space_and_reservation()
+
         response_data = {
             "requested_slot": {
                 "start": "18:30",
