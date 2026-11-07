@@ -80,10 +80,18 @@ export function createReservation(
     : request<ReservationCreated>('POST', '/reservations', { body });
 }
 
-export function getReservations(userId: string = DEFAULT_USER_ID): Promise<ReservationItem[]> {
+export function getReservations(
+  userId: string = DEFAULT_USER_ID,
+  includeCancelled = false,
+): Promise<ReservationItem[]> {
   return USE_MOCKS
-    ? mocks.getReservations(userId)
-    : request<ReservationItem[]>('GET', '/reservations', { query: { user_id: userId } });
+    ? mocks.getReservations(userId, includeCancelled)
+    : request<ReservationItem[]>('GET', '/reservations', {
+        query: {
+          user_id: userId,
+          include_cancelled: includeCancelled ? 'true' : 'false',
+        },
+      });
 }
 
 export function cancelReservation(reservationId: string): Promise<ReservationCancelled> {
