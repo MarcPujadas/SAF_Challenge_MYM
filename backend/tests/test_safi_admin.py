@@ -882,23 +882,23 @@ def test_admin_stats_returns_null_hours_without_historical_data(
     assert response.json()["data"]["quietest_hour"] is None
 
 
-def test_analytics_routes_keep_api_v1_prefix():
-    paths = {
-        route.path
-        for route in safi_admin.router.routes
-        if hasattr(route, "path")
-    }
+def test_analytics_routes_keep_api_v1_prefix(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        historical_service,
+        "load_historical_data",
+        empty_historical_records,
+    )
+    with make_client(tmp_path, monkeypatch) as client:
+        valid_paths = [
+            "/api/v1/availability/heatmap",
+            "/api/v1/admin/occupancy",
+            "/api/v1/admin/stats",
+            "/api/v1/availability/week",
+            "/api/v1/services",
+        ]
+        for path in valid_paths:
+            response = client.get(path)
+            assert response.status_code != 404, path
 
-    assert "/api/v1/availability/heatmap" in paths
-    assert "/api/v1/admin/occupancy" in paths
-    assert "/api/v1/admin/stats" in paths
-    assert "/availability/heatmap" not in paths
-
-    app_paths = {
-        route.path
-        for route in main.app.routes
-        if hasattr(route, "path")
-    }
-    assert "/api/v1/availability/week" in app_paths
-    assert "/api/v1/services" in app_paths
-    assert "/availability/week" not in app_paths
+        assert client.get("/availability/heatmap").status_code == 404
+        assert client.get("/availability/week").status_code == 404
