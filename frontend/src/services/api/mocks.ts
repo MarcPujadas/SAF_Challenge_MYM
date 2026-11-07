@@ -491,7 +491,8 @@ export async function getReservations(
   return reservations
     .filter(
       (reservation) =>
-        reservation.user_id === userId,
+        reservation.user_id === userId &&
+        reservation.status === 'confirmed',
     )
     .map((reservation) => ({
       reservation_id:

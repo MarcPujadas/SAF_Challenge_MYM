@@ -1,5 +1,6 @@
+import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { RootStackParamList } from '../navigation/types';
@@ -22,6 +23,7 @@ export default function MevesReservesScreen(_props: Props) {
   const [askingId, setAskingId] = useState<string | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [cancelOk, setCancelOk] = useState<string | null>(null);
 
   const loadReq = useRef(0);
 
@@ -32,7 +34,8 @@ export default function MevesReservesScreen(_props: Props) {
     try {
       const list = await getReservations();
       if (id !== loadReq.current) return;
-      setItems(list);
+      // Salvaguarda: la llista nomes mostra reserves actives, encara que el backend en retorni de cancel·lades.
+      setItems(list.filter((r) => r.status !== 'cancelled'));
     } catch (err) {
       if (id !== loadReq.current) return;
       setError(errorMessage(err));
@@ -40,17 +43,26 @@ export default function MevesReservesScreen(_props: Props) {
     if (id === loadReq.current) setLoading(false);
   }, []);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  // Recarrega cada cop que la pantalla recupera el focus (no nomes al primer cop).
+  useFocusEffect(
+    useCallback(() => {
+      setCancelOk(null);
+      setCancelError(null);
+      void load();
+    }, [load]),
+  );
 
   async function cancel(reservationId: string) {
     if (cancellingId) return;
     setCancellingId(reservationId);
     setCancelError(null);
+    setCancelOk(null);
     try {
       await cancelReservation(reservationId);
       setAskingId(null);
+      // Desapareix de la llista local i despres es refresca des del backend.
+      setItems((prev) => prev?.filter((r) => r.reservation_id !== reservationId) ?? prev);
+      setCancelOk('Reserva cancel·lada.');
     } catch (err) {
       setCancelError(errorMessage(err));
     }
@@ -70,6 +82,7 @@ export default function MevesReservesScreen(_props: Props) {
         </View>
       )}
       {cancelError && <Text style={styles.error}>{cancelError}</Text>}
+      {cancelOk && <Text style={styles.ok}>{cancelOk}</Text>}
       {!loading && !error && items && items.length === 0 && (
         <Text style={styles.muted}>Encara no tens reserves</Text>
       )}
@@ -127,6 +140,7 @@ const styles = StyleSheet.create({
   container: { padding: 16, paddingBottom: 48 },
   muted: { color: '#666', marginVertical: 8, textAlign: 'center' },
   error: { color: '#b00020', marginVertical: 8 },
+  ok: { color: '#2e7d32', marginVertical: 8, fontWeight: 'bold' },
   retryButton: { padding: 12, borderRadius: 10, backgroundColor: '#eee', alignItems: 'center' },
   retryText: { fontSize: 16 },
   card: { padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#ccc', marginBottom: 12 },
