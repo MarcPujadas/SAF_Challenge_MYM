@@ -814,7 +814,19 @@ Endpoints disponibles:
 
 - `POST /api/v1/safi/advice`
 - `POST /api/v1/safi/chat`
+- `POST /api/v1/safi/chat-llm`
 - `POST /api/v1/recommendations`
+
+`/api/v1/safi/chat` continua sent el flux determinista i funciona sense cap
+proveïdor LLM. `/api/v1/safi/chat-llm` utilitza Ornith només per redactar una
+resposta a partir de dades consultades pels serveis interns compartits.
+Disponibilitat actual, previsió històrica i reserves continuen sent fonts
+separades; el model no pot crear ni cancel·lar reserves.
+
+Per habilitar la integració, configura `UTH_KEY` a l'entorn del procés del
+backend. La clau no s'ha d'incloure al codi, al repositori ni als logs. Si no
+està configurada o Ornith no respon, `/safi/chat-llm` retorna
+`LLM_UNAVAILABLE`; una resposta incompatible retorna `LLM_ERROR`.
 
 ---
 

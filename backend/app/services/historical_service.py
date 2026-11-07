@@ -1,9 +1,11 @@
 from datetime import date as date_type
-from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 
+from app.config.services import SPACE_ID_BY_SERVICE_ID
+from app.config.schedules import STANDARD_75_MINUTE_SLOTS
+from app.services.schedule_service import time_to_minutes
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
@@ -13,53 +15,6 @@ DATA_PATH = (
     / "processed"
     / "historical_occupancy.csv"
 )
-
-
-# Torns reals de Fitness detectats al dataset.
-#
-# Dilluns-divendres:
-# torns de 75 minuts.
-#
-# Dissabte:
-# horari diferent.
-#
-# Diumenge:
-# el SAF tanca a les 14:00.
-STANDARD_75_MINUTE_SLOTS = {
-    0: [
-        "07:15", "08:30", "09:45", "11:00",
-        "12:15", "13:30", "14:45", "16:00",
-        "17:15", "18:30", "19:45"
-    ],
-    1: [
-        "07:15", "08:30", "09:45", "11:00",
-        "12:15", "13:30", "14:45", "16:00",
-        "17:15", "18:30", "19:45"
-    ],
-    2: [
-        "07:15", "08:30", "09:45", "11:00",
-        "12:15", "13:30", "14:45", "16:00",
-        "17:15", "18:30", "19:45"
-    ],
-    3: [
-        "07:15", "08:30", "09:45", "11:00",
-        "12:15", "13:30", "14:45", "16:00",
-        "17:15", "18:30", "19:45"
-    ],
-    4: [
-        "07:15", "08:30", "09:45", "11:00",
-        "12:15", "13:30", "14:45", "16:00",
-        "17:15", "18:30", "19:45"
-    ],
-    5: [
-        "08:30", "09:45", "11:00",
-        "12:15", "13:30", "14:45",
-        "16:00", "17:15", "18:30"
-    ],
-    6: [
-        "09:45", "11:00", "12:15"
-    ],
-}
 
 
 # Compatibility with the existing historical service.
@@ -79,12 +34,6 @@ def occupancy_level(score):
     return "very_high"
 
 
-def time_to_minutes(value):
-    time = datetime.strptime(value, "%H:%M")
-
-    return time.hour * 60 + time.minute
-
-
 def load_historical_data():
     if not DATA_PATH.exists():
         raise FileNotFoundError(
@@ -102,7 +51,7 @@ def get_valid_slots(space_id, weekday, available_slots):
     De moment només Fitness necessita aquest tractament especial.
     """
 
-    if space_id == "sala-fitnes-sala-cardio":
+    if space_id == SPACE_ID_BY_SERVICE_ID["fitness"]:
         return FITNESS_VALID_SLOTS.get(weekday, [])
 
     return sorted(available_slots)
@@ -209,7 +158,7 @@ def _get_scored_historical_occupancy():
     df["weekday"] = df["date"].map(
         lambda value: date_type.fromisoformat(value).weekday()
     )
-    is_fitness = df["space_id"] == "sala-fitnes-sala-cardio"
+    is_fitness = df["space_id"] == SPACE_ID_BY_SERVICE_ID["fitness"]
     if is_fitness.any():
         fitness = df[is_fitness]
         valid_slots = fitness.apply(
@@ -331,7 +280,7 @@ def get_historical_heatmap(
             records["space_id"] == current_space_id
         ]
         for weekday in range(7):
-            if current_space_id == "sala-fitnes-sala-cardio":
+            if current_space_id == SPACE_ID_BY_SERVICE_ID["fitness"]:
                 valid_slots = FITNESS_VALID_SLOTS.get(weekday, [])
             else:
                 valid_slots = sorted(space_records["start_time"].unique())
