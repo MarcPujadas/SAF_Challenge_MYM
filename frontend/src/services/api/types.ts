@@ -99,6 +99,26 @@ export type Heatmap = {
   days: HeatmapDay[];
 };
 
+// GET /availability/week?space_id=&from=&to=
+// PROVISIONAL, pendent de contracts.md (estructura orientativa de tasques_v3.md 4.3).
+// Disponibilitat actual (reserves + capacitat). Sense occupancy_*: aixo es la previsio.
+export type WeekSlot = {
+  start: string;
+  end: string;
+  available: boolean;
+  remaining_capacity: number | null;
+};
+
+export type WeekDay = {
+  date: string;
+  slots: WeekSlot[];
+};
+
+export type AvailabilityWeek = {
+  space_id: string;
+  days: WeekDay[];
+};
+
 // POST /reservations
 export type ReservationRequest = {
   user_id: string;

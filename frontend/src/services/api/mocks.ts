@@ -5,6 +5,7 @@ import { ApiError } from './client';
 
 import type {
   Availability,
+  AvailabilityWeek,
   Heatmap,
   Recommendation,
   RecommendationAction,
@@ -16,8 +17,10 @@ import type {
   ReservationRequest,
   SafiChatRequest,
   SafiChatResponse,
+  OccupancyLevel,
   Service,
   Slot,
+  WeekSlot,
 } from './types';
 
 const delay = () =>
@@ -33,6 +36,7 @@ const delay = () =>
 const FITNESS_SPACE_ID = 'sala-fitnes-sala-cardio';
 const POOL_25M_SPACE_ID = 'piscina-25-metres-carrer-1';
 const PADEL_SPACE_ID = 'pistes-de-padel-pista-1';
+const CLIMBING_SPACE_ID = 'rocodrom';
 
 
 // ---------------------------------------------------------
@@ -43,6 +47,7 @@ const SPACE_NAMES: Record<string, string> = {
   [FITNESS_SPACE_ID]: 'Sala Fitness',
   [POOL_25M_SPACE_ID]: 'Piscina 25 m',
   [PADEL_SPACE_ID]: 'Pista de pàdel 1',
+  [CLIMBING_SPACE_ID]: 'Rocòdrom',
 };
 
 
@@ -75,6 +80,13 @@ const SERVICES: Service[] = [
     description: 'Pistes de pàdel',
     space_id: PADEL_SPACE_ID,
     reservable: true,
+  },
+  {
+    id: 'climbing',
+    name: 'Rocòdrom',
+    description: 'Servei no reservable (només previsió)',
+    space_id: CLIMBING_SPACE_ID,
+    reservable: false,
   },
 ];
 
@@ -220,6 +232,34 @@ function requireSpace(spaceId: string): void {
 }
 
 
+const FITNESS_STARTS = [
+  '07:15', '08:30', '09:45', '11:00', '12:15', '13:30',
+  '14:45', '16:00', '17:15', '18:30', '19:45',
+];
+
+function addMinutes(hhmm: string, minutes: number): string {
+  const [h, m] = hhmm.split(':').map(Number);
+  const total = h * 60 + m + minutes;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(Math.floor(total / 60))}:${pad(total % 60)}`;
+}
+
+// Dates YYYY-MM-DD en local (mai toISOString).
+function rangeDates(from: string, to: string): string[] {
+  const out: string[] = [];
+  const [y, mo, d] = from.split('-').map(Number);
+  const cur = new Date(y, mo - 1, d);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  for (let i = 0; i < 31; i++) {
+    const s = `${cur.getFullYear()}-${pad(cur.getMonth() + 1)}-${pad(cur.getDate())}`;
+    if (s > to) break;
+    out.push(s);
+    cur.setDate(cur.getDate() + 1);
+  }
+  return out;
+}
+
+
 // ---------------------------------------------------------
 // GET /services
 // ---------------------------------------------------------
@@ -322,20 +362,68 @@ export async function getHeatmap(
     throw new ApiError('INVALID_DATE_RANGE', 'Rang de dates incorrecte.');
   }
 
-  // Dades fixes (no es calcula res): el primer dia del rang, amb dues franges.
-  return {
-    space_id: spaceId,
-    days: [
-      {
-        date: from,
-        slots: [
-          { hour: '09:45', occupancy_score: 31, occupancy_level: 'low' },
-          { hour: '12:00', occupancy_score: null, occupancy_level: 'unknown' },
-          { hour: '18:30', occupancy_score: 91, occupancy_level: 'very_high' },
-        ],
-      },
-    ],
-  };
+  // El rocodrom simula "sense dades de previsio" (days buit).
+  if (spaceId === CLIMBING_SPACE_ID) {
+    return { space_id: spaceId, days: [] };
+  }
+
+  // Dades fixes per posicio: nivells variats; el dia 7 del rang no te dades (cel·la "—").
+  const levels: [OccupancyLevel, number | null][] = [
+    ['low', 25],
+    ['medium', 52],
+    ['high', 74],
+    ['very_high', 91],
+    ['unknown', null],
+  ];
+  const days = rangeDates(from, to)
+    .slice(0, 6)
+    .map((date, d) => ({
+      date,
+      slots: FITNESS_STARTS.map((hour, h) => {
+        const [occupancy_level, occupancy_score] = levels[(d + h) % levels.length];
+        return { hour, occupancy_score, occupancy_level };
+      }),
+    }));
+  return { space_id: spaceId, days };
+}
+
+
+// ---------------------------------------------------------
+// GET /availability/week  (PROVISIONAL, pendent de contracts.md)
+// ---------------------------------------------------------
+
+export async function getAvailabilityWeek(
+  spaceId: string,
+  from: string,
+  to: string,
+): Promise<AvailabilityWeek> {
+  await delay();
+
+  requireSpace(spaceId);
+
+  if (from > to) {
+    throw new ApiError('INVALID_DATE_RANGE', 'Rang de dates incorrecte.');
+  }
+
+  // Dades fixes per posicio: tots els dies del rang, totes les franges de Fitness.
+  // Alguna franja plena i el diumenge sense franges (cel·la "—").
+  const days = rangeDates(from, to).map((date, d) => ({
+    date,
+    slots:
+      d === 6
+        ? []
+        : FITNESS_STARTS.map((start, h): WeekSlot => {
+            const full = (d * 3 + h) % 7 === 0;
+            const unknownCapacity = d === 5 && h > 6;
+            return {
+              start,
+              end: addMinutes(start, 75),
+              available: !full,
+              remaining_capacity: full ? 0 : unknownCapacity ? null : 10 + ((d + h) % 5) * 12,
+            };
+          }),
+  }));
+  return { space_id: spaceId, days };
 }
 
 

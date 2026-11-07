@@ -3,6 +3,7 @@ import { USE_MOCKS } from './config';
 import * as mocks from './mocks';
 import type {
   Availability,
+  AvailabilityWeek,
   Heatmap,
   Recommendation,
   RecommendationAction,
@@ -28,6 +29,19 @@ export function getAvailability(spaceId: string, date: string): Promise<Availabi
   return USE_MOCKS
     ? mocks.getAvailability(spaceId, date)
     : request<Availability>('GET', '/availability', { query: { space_id: spaceId, date } });
+}
+
+// PROVISIONAL, pendent de contracts.md: GET /availability/week (tasques_v3.md 4.3).
+export function getAvailabilityWeek(
+  spaceId: string,
+  from: string,
+  to: string,
+): Promise<AvailabilityWeek> {
+  return USE_MOCKS
+    ? mocks.getAvailabilityWeek(spaceId, from, to)
+    : request<AvailabilityWeek>('GET', '/availability/week', {
+        query: { space_id: spaceId, from, to },
+      });
 }
 
 export function postRecommendations(req: RecommendationRequest): Promise<Recommendation> {
