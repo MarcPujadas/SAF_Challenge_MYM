@@ -1,4 +1,28 @@
+<<<<<<< HEAD
 __pycache__/
 *.db
 .venv/
 .env
+=======
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Local environment
+.env
+
+# SQLite runtime files
+*.db
+*.db-shm
+*.db-wal
+
+# SAF datasets - never publish challenge data
+data/raw/
+data/processed/
+*.xlsx
+*.xls
+*.csv
+>>>>>>> origin/marc/backend-core
