@@ -127,23 +127,92 @@ SAFi només respon amb informació que pugui justificar amb les dades.
 
 ## Web d'administració
 
-Crear una web simple amb un dashboard.
+Crear una web amb un dashboard pensat com una **eina de decisió**, no només com un panell d'estadístiques.
 
-### Mostrar com a mínim
+L'objectiu és que els administradors del SAF puguin entendre què està passant, detectar problemes d'ocupació i decidir quines accions o activitats noves poden tenir sentit.
+
+### Estadístiques essencials
 
 - total de reserves,
 - reserves d'avui,
 - reserves per espai,
 - reserves per hora,
-- heatmap d'ocupació,
+- percentatge d'ocupació respecte a l'aforament,
+- heatmap d'ocupació per dia i hora,
 - hores amb més ocupació,
-- hores amb menys ocupació.
+- hores amb menys ocupació,
+- espais més utilitzats,
+- espais infrautilitzats,
+- activitats dirigides amb més i menys ocupació,
+- evolució de l'ocupació per setmana i mes.
 
-L'objectiu és que el SAF pugui veure ràpidament:
+### Informació útil per prendre decisions
+
+El dashboard ha de permetre respondre preguntes com:
 
 > On tenim saturació?
 
 > On tenim espais infrautilitzats?
+
+> Quines franges podrien absorbir més demanda?
+
+> Quines activitats tenen molta demanda?
+
+> Quines activitats o espais tenen poca ocupació?
+
+> En quin dia i hora tindria sentit provar una nova activitat?
+
+> Com ha evolucionat l'ocupació respecte de setmanes o mesos anteriors?
+
+### Insights i accions recomanades
+
+Afegir una secció tipus **SAFi Insights** amb missatges curts i accionables.
+
+Exemples:
+
+> Fitness està molt saturat els dilluns de 18:00 a 20:00.
+
+> Dijous de 19:00 a 21:00 hi ha més capacitat disponible.
+
+> La sala 3 està infrautilitzada aquesta setmana.
+
+> BODY PUMP té molta demanda els dimarts.
+
+> Es podria provar una nova activitat els dijous a les 19:00.
+
+Aquestes recomanacions sempre han de poder justificar-se amb dades.
+
+### Històric i aprenentatge del sistema
+
+Les noves dades generades per SAF Hack s'han de guardar per ampliar l'històric i millorar les recomanacions amb el temps.
+
+Com a mínim, guardar:
+
+- reserves creades,
+- ocupació observada per espai, dia i hora,
+- recomanacions fetes per SAFi,
+- si l'usuari ha acceptat o ignorat la recomanació,
+- estadístiques diàries agregades.
+
+Això permetrà:
+
+- comparar prediccions amb el comportament real,
+- millorar les recomanacions,
+- detectar nous patrons d'ocupació,
+- veure si SAFi ajuda a redistribuir la demanda,
+- construir estadístiques útils a llarg termini.
+
+Possibles taules futures:
+
+```text
+reservations
+occupancy_history
+recommendations
+recommendation_actions
+daily_stats
+```
+
+La idea és que **les dades inicials del SAF serveixin per començar i les dades generades per l'app serveixin per millorar el sistema amb el temps**.
 
 ---
 
@@ -267,6 +336,19 @@ No confondre aquestes dades pròpies de SAF Hack amb les dades històriques del 
 
 ---
 
+## Analítica avançada per administradors
+
+Si sobra temps:
+
+- predicció de saturació futura,
+- comparació entre predicció i ocupació real,
+- detecció automàtica de franges infrautilitzades,
+- suggeriments de nous horaris o activitats,
+- mesurar si les recomanacions de SAFi redistribueixen demanda,
+- comparar períodes equivalents.
+
+---
+
 ## Predicció avançada
 
 Només si tot l'MVP ja funciona.
@@ -359,7 +441,9 @@ Responsable de connectar els diferents serveis del backend.
 - preparar estructura `/safi/chat`,
 - endpoints `/admin/summary`,
 - `/admin/occupancy`,
-- `/admin/reservations`.
+- `/admin/reservations`,
+- `/admin/insights`,
+- `/admin/trends`.
 
 ### Després
 
@@ -399,7 +483,10 @@ Fer una web senzilla amb:
 - KPI cards,
 - heatmap,
 - gràfic de reserves per hora,
-- espais més utilitzats.
+- espais més i menys utilitzats,
+- evolució per setmanes i mesos,
+- activitats amb més i menys ocupació,
+- bloc de SAFi Insights amb recomanacions accionables.
 
 No dedicar temps al dashboard abans que la reserva mòbil funcioni.
 
