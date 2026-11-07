@@ -1,8 +1,10 @@
-import sqlite3
+from app.database.database import (
+    get_connection,
+    init_db,
+)
 
-DB_PATH = "app/database/safhack.db"
 
-services = [
+SERVICES = [
     {
         "id": "fitness",
         "name": "Fitness",
@@ -53,31 +55,65 @@ services = [
     },
 ]
 
-connection = sqlite3.connect(DB_PATH)
-cursor = connection.cursor()
 
-for service in services:
-    cursor.execute(
-        """
-        INSERT OR REPLACE INTO services (
-            id,
-            name,
-            description,
-            space_id,
-            reservable
-        )
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        (
-            service["id"],
-            service["name"],
-            service["description"],
-            service["space_id"],
-            1,
-        ),
-    )
+def main():
+    init_db()
 
-connection.commit()
-connection.close()
+    with get_connection() as connection:
 
-print(f"{len(services)} serveis importats.")
+        for service in SERVICES:
+
+            space = connection.execute(
+                """
+                SELECT id
+                FROM spaces
+                WHERE id = ?
+                """,
+                (
+                    service["space_id"],
+                )
+            ).fetchone()
+
+            if space is None:
+                print(
+                    "AVÍS: no existeix l'espai "
+                    f"{service['space_id']}. "
+                    f"No s'importa {service['id']}."
+                )
+
+                continue
+
+            connection.execute(
+                """
+                INSERT INTO services (
+                    id,
+                    name,
+                    description,
+                    space_id,
+                    reservable
+                )
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(id)
+                DO UPDATE SET
+                    name = excluded.name,
+                    description = excluded.description,
+                    space_id = excluded.space_id,
+                    reservable = excluded.reservable
+                """,
+                (
+                    service["id"],
+                    service["name"],
+                    service["description"],
+                    service["space_id"],
+                    1,
+                )
+            )
+
+            print(
+                f"{service['id']:20} "
+                f"-> {service['space_id']}"
+            )
+
+
+if __name__ == "__main__":
+    main()

@@ -19,6 +19,16 @@ from app.services.historical_service import (
 )
 from app.routers.safi_admin import router as safi_admin_router
 
+GENERAL_OPENING_HOURS = {
+    0: ("07:00", "21:00"),  # Monday
+    1: ("07:00", "21:00"),  # Tuesday
+    2: ("07:00", "21:00"),  # Wednesday
+    3: ("07:00", "21:00"),  # Thursday
+    4: ("07:00", "21:00"),  # Friday
+    5: ("08:00", "20:00"),  # Saturday
+    6: ("09:00", "14:00"),  # Sunday
+}
+
 
 class ReservationCreate(BaseModel):
     user_id: str
@@ -124,18 +134,43 @@ def build_slots(
             for start in valid_slots
         ]
 
-    duration = 60
-
-    starts = range(
-        8 * 60,
-        21 * 60 + 1,
-        duration
+    opening_hours = (
+        GENERAL_OPENING_HOURS.get(
+            weekday
+        )
     )
 
-    return [
-        (start, start + duration)
-        for start in starts
-    ]
+    if opening_hours is None:
+        return []
+
+    opening_time = time_to_minutes(
+        opening_hours[0]
+    )
+
+    closing_time = time_to_minutes(
+        opening_hours[1]
+    )
+
+    duration = 60
+
+    slots = []
+
+    start = opening_time
+
+    while (
+        start + duration
+        <= closing_time
+    ):
+        slots.append(
+            (
+                start,
+                start + duration
+            )
+        )
+
+        start += duration
+
+    return slots
 
 
 def validate_reservation_slot(
@@ -651,4 +686,56 @@ def list_reservations(
             dict(row)
             for row in rows
         ]
+    )
+
+
+@app.delete("/api/v1/reservations/{reservation_id}")
+def cancel_reservation(
+    reservation_id: str
+):
+    with get_connection() as connection:
+
+        reservation = connection.execute(
+            """
+            SELECT
+                id,
+                status
+            FROM reservations
+            WHERE id = ?
+            """,
+            (
+                reservation_id,
+            )
+        ).fetchone()
+
+        if reservation is None:
+            raise ApiError(
+                "RESERVATION_NOT_FOUND",
+                "The requested reservation does not exist.",
+                404
+            )
+
+        if reservation["status"] == "cancelled":
+            raise ApiError(
+                "RESERVATION_ALREADY_CANCELLED",
+                "The reservation is already cancelled.",
+                409
+            )
+
+        connection.execute(
+            """
+            UPDATE reservations
+            SET status = 'cancelled'
+            WHERE id = ?
+            """,
+            (
+                reservation_id,
+            )
+        )
+
+    return success(
+        {
+            "reservation_id": reservation_id,
+            "status": "cancelled"
+        }
     )
