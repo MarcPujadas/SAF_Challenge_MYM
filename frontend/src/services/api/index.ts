@@ -92,14 +92,20 @@ export function cancelReservation(reservationId: string): Promise<ReservationCan
     : request<ReservationCancelled>('DELETE', `/reservations/${encodeURIComponent(reservationId)}`);
 }
 
-export function chatSafi(
+export async function chatSafi(
   message: string,
   userId: string = DEFAULT_USER_ID,
 ): Promise<SafiChatResponse> {
   const body: SafiChatRequest = { user_id: userId, message };
-  return USE_MOCKS
-    ? mocks.chatSafi(body)
-    : request<SafiChatResponse>('POST', '/safi/chat', { body });
+  if (USE_MOCKS) return mocks.chatSafi(body);
+
+  try {
+    return await request<SafiChatResponse>('POST', '/safi/chat-llm', { body });
+  } catch {
+    // Demo-safe fallback: if Ornith is unavailable or returns an invalid response,
+    // keep SAFi usable through the deterministic backend.
+    return request<SafiChatResponse>('POST', '/safi/chat', { body });
+  }
 }
 
 export { ApiError } from './client';
