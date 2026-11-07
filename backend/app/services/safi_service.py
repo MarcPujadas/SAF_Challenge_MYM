@@ -7,6 +7,7 @@ from app.config.services import (
     SERVICE_SEARCH_PHRASES,
     SPACE_ID_BY_ALIAS,
 )
+from app.services.catalog_service import supports_safi_recommendations
 from app.services.historical_service import (
     get_historical_occupancy,
 )
@@ -149,6 +150,13 @@ def advice(space_id: str, date_value: str, start: str) -> dict[str, Any]:
         raise ValueError("preferred_end must be later than preferred_start.")
 
     actual_space_id = SPACE_ALIASES.get(space_id, space_id)
+    if not supports_safi_recommendations(actual_space_id):
+        return {
+            "type": "info",
+            "message": "SAFi no ofereix recomanacions d'ocupació per aquest tipus d'espai.",
+            "alternative": None,
+            "occupancy_score": None,
+        }
     result = recommend(actual_space_id, parsed_date.isoformat(), start, end)
     requested = result["requested_slot"]
     score = requested["occupancy_score"]
@@ -202,6 +210,12 @@ def advice(space_id: str, date_value: str, start: str) -> dict[str, Any]:
 def chat(message: str) -> dict[str, Any]:
     normalized = normalize_text(message)
     space_id = detect_space_id(message)
+    if space_id is not None and not supports_safi_recommendations(space_id):
+        return {
+            "message": "SAFi no ofereix recomanacions d'ocupació per aquest tipus d'espai.",
+            "sources": [],
+            "can_answer": False,
+        }
     if space_id is None or not any(
         word in normalized
         for word in (
