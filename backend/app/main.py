@@ -11,11 +11,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from app.common import ApiError, error_payload, success
 from app.database.database import get_connection, init_db
 from app.services.historical_service import (
     FITNESS_VALID_SLOTS,
     get_historical_occupancy,
 )
+from app.routers.safi_admin import router as safi_admin_router
 
 
 class ReservationCreate(BaseModel):
@@ -24,39 +26,6 @@ class ReservationCreate(BaseModel):
     date: str
     start: str
     end: str
-
-
-class ApiError(Exception):
-    def __init__(
-        self,
-        code: str,
-        message: str,
-        status_code: int = 400
-    ):
-        super().__init__(message)
-
-        self.code = code
-        self.message = message
-        self.status_code = status_code
-
-
-def success(data):
-    return {
-        "success": True,
-        "data": data,
-        "error": None
-    }
-
-
-def error_payload(code: str, message: str):
-    return {
-        "success": False,
-        "data": None,
-        "error": {
-            "code": code,
-            "message": message
-        }
-    }
 
 
 def parse_date(value: str) -> date_type:
@@ -224,6 +193,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+app.include_router(safi_admin_router)
 
 
 @app.exception_handler(ApiError)

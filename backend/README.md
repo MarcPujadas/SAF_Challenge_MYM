@@ -37,6 +37,13 @@ http://127.0.0.1:8000/docs
 - `GET /api/v1/availability?space_id=fitness&date=2026-11-10`
 - `POST /api/v1/reservations`
 - `GET /api/v1/reservations?user_id=demo-user`
+- `POST /api/v1/recommendations`
+- `POST /api/v1/safi/advice`
+- `POST /api/v1/safi/chat`
+- `GET /api/v1/admin/summary`
+- `GET /api/v1/admin/stats`
+- `GET /api/v1/admin/reservations`
+- `GET /api/v1/admin/occupancy`
 
 The SQLite database is created locally on first startup and is intentionally ignored by Git.
 

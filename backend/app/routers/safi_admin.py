@@ -1,46 +1,18 @@
-import os
-import sqlite3
 from contextlib import closing
-from datetime import date, datetime
-from pathlib import Path
+from datetime import date
 from typing import Any
 
-from fastapi import FastAPI, Query, Request
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
-from recommendation_service import recommend
-from safi_service import advice, chat
+from app.common import ApiError, success
+from app.database.database import get_connection
+from app.services.recommendation_service import recommend
+from app.services.safi_service import advice, chat
+from app.services.validation import validate_date_time
 
 
-DATABASE_PATH = Path(
-    os.environ.get(
-        "SAFHACK_DB_PATH",
-        str(
-            Path(__file__).resolve().parent
-            / "backend"
-            / "app"
-            / "database"
-            / "safhack.db"
-        ),
-    )
-)
-API_PREFIX = "/api/v1"
-SPACE_NAMES = {
-    "fitness": "Sala Fitness",
-    "pool": "Piscina",
-    "piscina": "Piscina",
-}
-
-app = FastAPI(title="SAF Hack API")
-
-
-class APIError(Exception):
-    def __init__(self, status_code: int, code: str, message: str) -> None:
-        self.status_code = status_code
-        self.code = code
-        self.message = message
+router = APIRouter(prefix="/api/v1")
 
 
 class RecommendationRequest(BaseModel):
@@ -61,56 +33,23 @@ class SAFiChatRequest(BaseModel):
     message: str
 
 
-def success(data: Any) -> dict[str, Any]:
-    return {"success": True, "data": data, "error": None}
-
-
-def initialize_database() -> None:
-    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with closing(sqlite3.connect(DATABASE_PATH)) as connection:
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS reservations (
-                reservation_id TEXT PRIMARY KEY,
-                user_id TEXT,
-                space_id TEXT NOT NULL,
-                date TEXT NOT NULL,
-                start TEXT NOT NULL,
-                end TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'confirmed'
-            )
-            """
-        )
-        connection.commit()
-
-
-def get_reservations(
-    date_from: str | None = None,
-    date_to: str | None = None,
-    space_id: str | None = None,
-) -> list[sqlite3.Row]:
-    conditions = ["status != 'cancelled'"]
-    parameters: list[str] = []
-    if date_from is not None:
-        conditions.append("date >= ?")
-        parameters.append(date_from)
-    if date_to is not None:
-        conditions.append("date <= ?")
-        parameters.append(date_to)
-    if space_id is not None:
-        conditions.append("space_id = ?")
-        parameters.append(space_id)
-
-    with closing(sqlite3.connect(DATABASE_PATH)) as connection:
-        connection.row_factory = sqlite3.Row
+def get_reservations() -> list[Any]:
+    with closing(get_connection()) as connection:
         return connection.execute(
-            f"""
-            SELECT reservation_id, space_id, date, start, end, status
-            FROM reservations
-            WHERE {" AND ".join(conditions)}
-            ORDER BY date, start, reservation_id
-            """,
-            parameters,
+            """
+            SELECT
+                r.id AS reservation_id,
+                r.space_id,
+                s.name AS space_name,
+                r.date,
+                r.start,
+                r.end,
+                r.status
+            FROM reservations r
+            JOIN spaces s ON s.id = r.space_id
+            WHERE r.status != 'cancelled'
+            ORDER BY r.date, r.start, r.id
+            """
         ).fetchall()
 
 
@@ -120,87 +59,65 @@ def parse_date(value: str | None, field: str) -> str | None:
     try:
         parsed_date = date.fromisoformat(value)
     except ValueError as exc:
-        raise APIError(400, "INVALID_DATE", f"{field} must use YYYY-MM-DD.") from exc
+        raise ApiError("INVALID_DATE", f"{field} must use YYYY-MM-DD.", 400) from exc
     if parsed_date.isoformat() != value:
-        raise APIError(400, "INVALID_DATE", f"{field} must use YYYY-MM-DD.")
+        raise ApiError("INVALID_DATE", f"{field} must use YYYY-MM-DD.", 400)
     return parsed_date.isoformat()
 
 
-@app.exception_handler(APIError)
-async def handle_api_error(_: Request, exc: APIError) -> JSONResponse:
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "success": False,
-            "data": None,
-            "error": {"code": exc.code, "message": exc.message},
-        },
-    )
-
-
-@app.exception_handler(RequestValidationError)
-async def handle_validation_error(
-    _: Request, exc: RequestValidationError
-) -> JSONResponse:
-    return JSONResponse(
-        status_code=422,
-        content={
-            "success": False,
-            "data": None,
-            "error": {
-                "code": "INVALID_REQUEST",
-                "message": "The request does not match the required format.",
-            },
-        },
-    )
-
-
-@app.on_event("startup")
-def startup() -> None:
-    initialize_database()
-
-
-@app.post(f"{API_PREFIX}/recommendations")
+@router.post("/recommendations")
 def create_recommendation(payload: RecommendationRequest) -> dict[str, Any]:
     try:
+        parsed_date, start_minutes = validate_date_time(
+            payload.date,
+            payload.preferred_start,
+        )
+        _, end_minutes = validate_date_time(
+            payload.date,
+            payload.preferred_end,
+        )
+        if end_minutes <= start_minutes:
+            raise ValueError("preferred_end must be later than preferred_start.")
         result = recommend(
             payload.space_id,
-            payload.date,
+            parsed_date.isoformat(),
             payload.preferred_start,
             payload.preferred_end,
         )
     except ValueError as exc:
-        raise APIError(400, "INVALID_TIME", str(exc)) from exc
-    if result is None:
-        raise APIError(
-            404,
+        raise ApiError("INVALID_TIME", str(exc), 400) from exc
+    if result["requested_slot"]["occupancy_score"] is None:
+        raise ApiError(
             "OCCUPANCY_DATA_UNAVAILABLE",
             "No hi ha dades d'ocupació disponibles per a aquesta consulta.",
+            404,
         )
     return success(result)
 
 
-@app.post(f"{API_PREFIX}/safi/advice")
+@router.post("/safi/advice")
 def get_safi_advice(payload: SAFiAdviceRequest) -> dict[str, Any]:
     try:
         result = advice(payload.space_id, payload.date, payload.start)
     except ValueError as exc:
-        raise APIError(400, "INVALID_TIME", str(exc)) from exc
+        raise ApiError("INVALID_TIME", str(exc), 400) from exc
     return success(result)
 
 
-@app.post(f"{API_PREFIX}/safi/chat")
+@router.post("/safi/chat")
 def chat_with_safi(payload: SAFiChatRequest) -> dict[str, Any]:
     return success(chat(payload.message))
 
 
-@app.get(f"{API_PREFIX}/admin/summary")
+@router.get("/admin/summary")
 def get_admin_summary() -> dict[str, Any]:
     reservations = get_reservations()
     space_counts: dict[str, int] = {}
+    space_names: dict[str, str] = {}
     hour_counts: dict[str, int] = {}
     for reservation in reservations:
         space_id = reservation["space_id"]
+        space_names[space_id] = reservation["space_name"]
         hour = reservation["start"][:5]
         space_counts[space_id] = space_counts.get(space_id, 0) + 1
         hour_counts[hour] = hour_counts.get(hour, 0) + 1
@@ -225,7 +142,7 @@ def get_admin_summary() -> dict[str, Any]:
             "busiest_space": (
                 {
                     "id": busiest_space_id,
-                    "name": SPACE_NAMES.get(busiest_space_id, busiest_space_id),
+                    "name": space_names[busiest_space_id],
                 }
                 if busiest_space_id is not None
                 else None
@@ -235,18 +152,20 @@ def get_admin_summary() -> dict[str, Any]:
     )
 
 
-@app.get(f"{API_PREFIX}/admin/stats")
+@router.get("/admin/stats")
 def get_admin_stats() -> dict[str, Any]:
     reservations = get_reservations()
     space_counts: dict[str, int] = {}
+    space_names: dict[str, str] = {}
     for reservation in reservations:
         space_id = reservation["space_id"]
         space_counts[space_id] = space_counts.get(space_id, 0) + 1
+        space_names[space_id] = reservation["space_name"]
 
     most_used_spaces = [
         {
             "space_id": space_id,
-            "name": SPACE_NAMES.get(space_id, space_id),
+            "name": space_names[space_id],
             "total_reservations": count,
         }
         for space_id, count in sorted(
@@ -265,7 +184,7 @@ def get_admin_stats() -> dict[str, Any]:
     )
 
 
-@app.get(f"{API_PREFIX}/admin/reservations")
+@router.get("/admin/reservations")
 def get_admin_reservations() -> dict[str, Any]:
     return success(
         [
@@ -281,7 +200,7 @@ def get_admin_reservations() -> dict[str, Any]:
     )
 
 
-@app.get(f"{API_PREFIX}/admin/occupancy")
+@router.get("/admin/occupancy")
 def get_admin_occupancy(
     date_from: str | None = Query(default=None, alias="from"),
     date_to: str | None = Query(default=None, alias="to"),
@@ -290,7 +209,7 @@ def get_admin_occupancy(
     start = parse_date(date_from, "from")
     end = parse_date(date_to, "to")
     if start is not None and end is not None and start > end:
-        raise APIError(400, "INVALID_DATE_RANGE", "'from' must be on or before 'to'.")
+        raise ApiError("INVALID_DATE_RANGE", "'from' must be on or before 'to'.", 400)
 
     return success(
         {
