@@ -12,6 +12,14 @@ from app.services.historical_service import (
     get_historical_occupancy_by_date,
     get_historical_occupancy_by_hour,
 )
+from app.services.admin_analytics_service import (
+    get_cancellation_analytics,
+    get_occupancy_by_weekday,
+    get_occupancy_slot_rankings,
+    get_occupancy_trend,
+    get_safi_impact,
+    get_space_utilization,
+)
 from app.services.recommendation_service import recommend
 from app.services.safi_service import advice, chat
 from app.services.validation import validate_date_time
@@ -434,5 +442,136 @@ def get_admin_recommendation_stats(
             },
             "space_id": space_id,
             **stats,
+        }
+    )
+
+
+def _admin_analytics_filters(
+    date_from: str | None,
+    date_to: str | None,
+) -> tuple[str | None, str | None]:
+    return parse_date_range(date_from, date_to)
+
+
+@router.get("/admin/analytics/occupancy-by-weekday")
+def get_admin_occupancy_by_weekday(
+    space_id: str | None = None,
+    date_from: str | None = Query(default=None, alias="from"),
+    date_to: str | None = Query(default=None, alias="to"),
+) -> dict[str, Any]:
+    start, end = _admin_analytics_filters(date_from, date_to)
+    return success(
+        {
+            "period": {"from": start, "to": end},
+            "spaces": get_occupancy_by_weekday(
+                space_id=space_id,
+                date_from=start,
+                date_to=end,
+            ),
+        }
+    )
+
+
+
+@router.get("/admin/analytics/occupancy-slots")
+def get_admin_occupancy_slots(
+    space_id: str | None = None,
+    date_from: str | None = Query(default=None, alias="from"),
+    date_to: str | None = Query(default=None, alias="to"),
+) -> dict[str, Any]:
+    start, end = _admin_analytics_filters(date_from, date_to)
+    return success(
+        {
+            "period": {"from": start, "to": end},
+            "spaces": get_occupancy_slot_rankings(
+                space_id=space_id,
+                date_from=start,
+                date_to=end,
+            ),
+        }
+    )
+
+
+@router.get("/admin/analytics/utilization")
+def get_admin_utilization(
+    space_id: str | None = None,
+    date_from: str | None = Query(default=None, alias="from"),
+    date_to: str | None = Query(default=None, alias="to"),
+) -> dict[str, Any]:
+    start, end = _admin_analytics_filters(date_from, date_to)
+    return success(
+        {
+            "period": {"from": start, "to": end},
+            "spaces": get_space_utilization(
+                space_id=space_id,
+                date_from=start,
+                date_to=end,
+            ),
+        }
+    )
+
+
+@router.get("/admin/analytics/occupancy-trend")
+def get_admin_occupancy_trend(
+    group_by: str = Query(default="week"),
+    space_id: str | None = None,
+    date_from: str | None = Query(default=None, alias="from"),
+    date_to: str | None = Query(default=None, alias="to"),
+) -> dict[str, Any]:
+    if group_by not in {"week", "month"}:
+        raise ApiError(
+            "INVALID_GROUP_BY",
+            "'group_by' must be 'week' or 'month'.",
+            400,
+        )
+    start, end = _admin_analytics_filters(date_from, date_to)
+    return success(
+        {
+            "period": {"from": start, "to": end},
+            "group_by": group_by,
+            "series": get_occupancy_trend(
+                group_by=group_by,
+                space_id=space_id,
+                date_from=start,
+                date_to=end,
+            ),
+        }
+    )
+
+
+@router.get("/admin/analytics/cancellations")
+def get_admin_cancellations(
+    space_id: str | None = None,
+    date_from: str | None = Query(default=None, alias="from"),
+    date_to: str | None = Query(default=None, alias="to"),
+) -> dict[str, Any]:
+    start, end = _admin_analytics_filters(date_from, date_to)
+    return success(
+        {
+            "period": {"from": start, "to": end},
+            "spaces": get_cancellation_analytics(
+                space_id=space_id,
+                date_from=start,
+                date_to=end,
+            ),
+        }
+    )
+
+
+@router.get("/admin/analytics/safi-impact")
+def get_admin_safi_impact(
+    space_id: str | None = None,
+    date_from: str | None = Query(default=None, alias="from"),
+    date_to: str | None = Query(default=None, alias="to"),
+) -> dict[str, Any]:
+    start, end = _admin_analytics_filters(date_from, date_to)
+    return success(
+        {
+            "period": {"from": start, "to": end},
+            "spaces": get_safi_impact(
+                space_id=space_id,
+                date_from=start,
+                date_to=end,
+            ),
         }
     )

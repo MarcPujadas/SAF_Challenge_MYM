@@ -997,6 +997,201 @@ INVALID_DATE_RANGE
 
 ---
 
+## Decision analytics d'administració
+
+Els endpoints següents retornen dades dins de l'envelope estàndard `success`,
+`data`, `error`. Els filtres `from` i `to` són opcionals, inclusius i utilitzen
+el format `YYYY-MM-DD`; `space_id` també és opcional. Una data no vàlida retorna
+`INVALID_DATE` i un rang on `from` és posterior a `to` retorna
+`INVALID_DATE_RANGE`.
+
+Les mètriques d'ocupació i tendència provenen exclusivament de
+`historical_occupancy.csv` processat i utilitzen `occupancy_score` (0-100).
+`samples` és el nombre de mostres històriques incloses a l'agregació. Els nivells
+segueixen els llindars compartits: `low` (<35), `medium` (35-64), `high`
+(65-84) i `very_high` (85-100). Sense mostres, les llistes històriques són
+buïdes; no es creen puntuacions.
+
+### GET /admin/analytics/occupancy-by-weekday
+
+Retorna la puntuació mitjana històrica per dia de la setmana i espai.
+
+```json
+{
+  "success": true,
+  "data": {
+    "period": {"from": "2026-04-01", "to": "2026-04-30"},
+    "spaces": [
+      {
+        "space_id": "sala-fitnes-sala-cardio",
+        "weekdays": [
+          {
+            "day_of_week": "Monday",
+            "average_occupancy_score": 67,
+            "occupancy_level": "high",
+            "samples": 12
+          }
+        ]
+      }
+    ]
+  },
+  "error": null
+}
+```
+
+### GET /admin/analytics/occupancy-slots
+
+Retorna fins a cinc franges històriques més saturades i cinc més tranquil·les
+per espai. Les franges sense score no s'inclouen.
+
+```json
+{
+  "success": true,
+  "data": {
+    "period": {"from": null, "to": null},
+    "spaces": [
+      {
+        "space_id": "sala-fitnes-sala-cardio",
+        "most_saturated": [
+          {
+            "day_of_week": "Monday",
+            "hour": "18:30",
+            "occupancy_score": 100,
+            "occupancy_level": "very_high",
+            "samples": 4
+          }
+        ],
+        "quietest": []
+      }
+    ]
+  },
+  "error": null
+}
+```
+
+### GET /admin/analytics/utilization
+
+Retorna una entrada per cada espai del filtre (o present a l'històric) amb
+`utilization_percentage`. L'històric actual no inclou capacitat comparable, de
+manera que aquest percentatge és `null`, `status` és `insufficient_data` i
+`reason` és `historical_capacity_unavailable`. `occupancy_score` no s'interpreta
+com un percentatge de capacitat.
+
+```json
+{
+  "success": true,
+  "data": {
+    "period": {"from": null, "to": null},
+    "spaces": [
+      {
+        "space_id": "sala-fitnes-sala-cardio",
+        "utilization_percentage": null,
+        "status": "insufficient_data",
+        "reason": "historical_capacity_unavailable",
+        "samples": 120
+      }
+    ]
+  },
+  "error": null
+}
+```
+
+### GET /admin/analytics/occupancy-trend
+
+Accepta també `group_by=week|month` (per defecte `week`). Per setmana,
+`period` és la data del dilluns corresponent; per mes, és `YYYY-MM`. Un altre
+valor retorna `INVALID_GROUP_BY`.
+
+```json
+{
+  "success": true,
+  "data": {
+    "period": {"from": "2026-04-01", "to": "2026-04-30"},
+    "group_by": "week",
+    "series": [
+      {
+        "space_id": "sala-fitnes-sala-cardio",
+        "period": "2026-04-06",
+        "average_occupancy_score": 67,
+        "occupancy_level": "high",
+        "samples": 24
+      }
+    ]
+  },
+  "error": null
+}
+```
+
+### GET /admin/analytics/cancellations
+
+Utilitza les files de reserves reals de SQLite, no l'històric d'ocupació.
+`total_reservations` inclou tots els estats; els comptadors de confirmades i
+cancel·lades són explícits. La taxa és
+`cancelled_reservations / total_reservations × 100` i és `null` sense reserves.
+`most_cancelled_slots` conté fins a cinc combinacions dia/hora amb cancel·lacions.
+
+```json
+{
+  "success": true,
+  "data": {
+    "period": {"from": "2026-04-01", "to": "2026-04-30"},
+    "spaces": [
+      {
+        "space_id": "sala-fitnes-sala-cardio",
+        "total_reservations": 20,
+        "confirmed_reservations": 15,
+        "cancelled_reservations": 5,
+        "cancellation_rate": 25.0,
+        "most_cancelled_slots": [
+          {
+            "day_of_week": "Monday",
+            "hour": "18:30",
+            "cancelled_reservations": 3
+          }
+        ]
+      }
+    ]
+  },
+  "error": null
+}
+```
+
+### GET /admin/analytics/safi-impact
+
+Agrega recomanacions i l'acció actual guardada per a cada recomanació. El
+percentatge d'acceptació utilitza només recomanacions amb decisió. La reducció
+mitjana només inclou accions `accepted` amb franges diferents i scores vàlids
+(0-100) on el score recomanat és menor. `accepted_high_to_lower_recommendations`
+compta aquestes reduccions amb score demanat de 65 o més. Sense cap reducció
+vàlida, `average_saturation_reduction` és `null`. Les accions emmagatzemen
+l'estat actual, no un historial de canvis d'acció.
+
+```json
+{
+  "success": true,
+  "data": {
+    "period": {"from": "2026-04-01", "to": "2026-04-30"},
+    "spaces": [
+      {
+        "space_id": "sala-fitnes-sala-cardio",
+        "recommendations_generated": 20,
+        "accepted": 12,
+        "ignored": 5,
+        "without_action": 3,
+        "decision_rate": 85.0,
+        "acceptance_rate": 70.6,
+        "accepted_high_to_lower_recommendations": 8,
+        "accepted_recommendations_with_score_reduction": 10,
+        "average_saturation_reduction": 18.5
+      }
+    ]
+  },
+  "error": null
+}
+```
+
+---
+
 ## GET /admin/recommendations/stats
 
 Retorna estadístiques sobre les recomanacions generades per SAFi i les decisions dels usuaris.
