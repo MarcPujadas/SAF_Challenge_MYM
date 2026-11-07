@@ -185,6 +185,157 @@ def add_occupancy_scores(statistics):
     return statistics
 
 
+def get_historical_occupancy_by_date(
+    date_from=None,
+    date_to=None,
+    space_id=None,
+):
+    df = load_historical_data()
+    if df.empty:
+        return pd.DataFrame(
+            columns=[
+                "space_id",
+                "date",
+                "start_time",
+                "reservations",
+                "occupancy_score",
+                "occupancy_level",
+            ]
+        )
+
+    df["date"] = df["date"].astype(str)
+    if date_from is not None:
+        df = df[df["date"] >= date_from]
+    if date_to is not None:
+        df = df[df["date"] <= date_to]
+    if space_id is not None:
+        df = df[df["space_id"] == space_id]
+    if df.empty:
+        return pd.DataFrame(
+            columns=[
+                "space_id",
+                "date",
+                "start_time",
+                "reservations",
+                "occupancy_score",
+                "occupancy_level",
+            ]
+        )
+
+    is_fitness = df["space_id"] == "sala-fitnes-sala-cardio"
+    if is_fitness.any():
+        fitness = df[is_fitness]
+        valid_slots = fitness.apply(
+            lambda row: row["start_time"]
+            in get_valid_slots(
+                row["space_id"],
+                int(row["weekday"]),
+                [row["start_time"]],
+            ),
+            axis=1,
+        )
+        df = pd.concat(
+            [
+                df[~is_fitness],
+                fitness[valid_slots],
+            ]
+        )
+    if df.empty:
+        return pd.DataFrame(
+            columns=[
+                "space_id",
+                "date",
+                "start_time",
+                "reservations",
+                "occupancy_score",
+                "occupancy_level",
+            ]
+        )
+
+    daily_reservations = (
+        df.groupby(
+            ["space_id", "date", "weekday", "start_time"],
+            as_index=False,
+        )["reservations"]
+        .sum()
+    )
+    scores = []
+    for (current_space, weekday), weekday_data in daily_reservations.groupby(
+        ["space_id", "weekday"]
+    ):
+        statistics = calculate_slot_statistics(weekday_data)
+        statistics = add_occupancy_scores(statistics)
+        statistics["space_id"] = current_space
+        statistics["weekday"] = weekday
+        scores.append(
+            statistics[
+                [
+                    "space_id",
+                    "weekday",
+                    "start_time",
+                    "occupancy_score",
+                ]
+            ]
+        )
+
+    slot_scores = pd.concat(scores, ignore_index=True)
+    result = daily_reservations.merge(
+        slot_scores,
+        on=["space_id", "weekday", "start_time"],
+        how="left",
+    )
+    result["occupancy_level"] = result["occupancy_score"].map(
+        lambda score: occupancy_level(int(score))
+    )
+    return result[
+        [
+            "space_id",
+            "date",
+            "start_time",
+            "reservations",
+            "occupancy_score",
+            "occupancy_level",
+        ]
+    ]
+
+
+def get_historical_occupancy_by_hour():
+    daily_occupancy = get_historical_occupancy_by_date()
+    if daily_occupancy.empty:
+        return pd.DataFrame(
+            columns=[
+                "space_id",
+                "start_time",
+                "occupancy_score",
+                "occupancy_level",
+            ]
+        )
+
+    hourly_scores = []
+    for space_id, space_records in daily_occupancy.groupby("space_id"):
+        slot_statistics = (
+            space_records.groupby("start_time", as_index=False)
+            .agg(
+                average_reservations=("reservations", "mean"),
+                samples=("reservations", "count"),
+            )
+        )
+        slot_statistics = add_occupancy_scores(slot_statistics)
+        slot_statistics["space_id"] = space_id
+        hourly_scores.append(
+            slot_statistics[
+                [
+                    "space_id",
+                    "start_time",
+                    "occupancy_score",
+                    "samples",
+                ]
+            ]
+        )
+
+    return pd.concat(hourly_scores, ignore_index=True)
+
+
 def get_historical_occupancy(
     space_id,
     weekday,
