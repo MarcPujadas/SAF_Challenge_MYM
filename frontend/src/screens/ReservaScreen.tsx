@@ -2,17 +2,30 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import HeatmapGrid, { availabilityCell, forecastCell } from '../components/HeatmapGrid';
+import type { CellValue, HeatmapMode } from '../components/HeatmapGrid';
 import type { RootStackParamList } from '../navigation/types';
 import {
   ApiError,
   createReservation,
   errorMessage,
   getAvailability,
+  getAvailabilityWeek,
+  getHeatmap,
   getServices,
   postRecommendationAction,
   postRecommendations,
 } from '../services/api';
-import type { Availability, OccupancyLevel, Recommendation, Service, Slot } from '../services/api';
+import type {
+  Availability,
+  AvailabilityWeek,
+  Heatmap,
+  OccupancyLevel,
+  Recommendation,
+  Service,
+  Slot,
+} from '../services/api';
+import { addDays, todayDate } from '../utils/dates';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Reserva'>;
 
@@ -44,8 +57,18 @@ function nextDays(): Day[] {
   return days;
 }
 
-export default function ReservaScreen({ navigation }: Props) {
+export default function ReservaScreen({ navigation, route }: Props) {
   const days = useMemo(nextDays, []);
+  const dayDates = useMemo(() => days.map((d) => d.date), [days]);
+
+  // Mini heatmap (pas 2): propers 7 dies.
+  const [miniMode, setMiniMode] = useState<HeatmapMode>('availability');
+  const [miniWeek, setMiniWeek] = useState<AvailabilityWeek | null>(null);
+  const [miniForecast, setMiniForecast] = useState<Heatmap | null>(null);
+  const [miniLoading, setMiniLoading] = useState(false);
+  const [miniError, setMiniError] = useState<string | null>(null);
+  const miniReq = useRef(0);
+  const paramsApplied = useRef(false);
 
   // Pas 1: servei
   const [services, setServices] = useState<Service[] | null>(null);
@@ -67,6 +90,7 @@ export default function ReservaScreen({ navigation }: Props) {
   const [adviceLoading, setAdviceLoading] = useState(false);
   const [adviceFailed, setAdviceFailed] = useState(false);
   const [adviceNoData, setAdviceNoData] = useState<string | null>(null);
+  const [adviceDismissed, setAdviceDismissed] = useState(false);
 
   // Pas 5: confirmar
   const [submitting, setSubmitting] = useState(false);
@@ -95,21 +119,73 @@ export default function ReservaScreen({ navigation }: Props) {
     try {
       const list = await getServices();
       if (id !== servicesReq.current) return;
-      setServices(list.filter((s) => s.reservable));
+      const reservable = list.filter((s) => s.reservable);
+      setServices(reservable);
+
+      // Parametres de navegacio (des del Heatmap): preseleccio de servei, dia i franja.
+      const params = route.params;
+      if (params?.serviceId && !paramsApplied.current) {
+        paramsApplied.current = true;
+        const wanted = reservable.find((s) => s.id === params.serviceId);
+        if (wanted) {
+          setService(wanted);
+          if (params.date) {
+            setDate(params.date);
+            void loadAvailability(
+              wanted.space_id,
+              params.date,
+              params.start ? { service: wanted, start: params.start } : undefined,
+            );
+          }
+        }
+      }
     } catch (err) {
       if (id !== servicesReq.current) return;
       setServicesError(errorMessage(err));
     }
     if (id === servicesReq.current) setServicesLoading(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     void loadServices();
   }, [loadServices]);
 
-  const loadAvailability = useCallback(async (spaceId: string, day: string) => {
+  // Mini heatmap: es recarrega en canviar servei o mode.
+  const loadMini = useCallback(async (s: Service, mode: HeatmapMode) => {
+    const id = ++miniReq.current;
+    setMiniWeek(null);
+    setMiniForecast(null);
+    setMiniError(null);
+    setMiniLoading(true);
+    const from = todayDate();
+    const to = addDays(from, 6);
+    try {
+      if (mode === 'availability') {
+        const result = await getAvailabilityWeek(s.space_id, from, to);
+        if (id !== miniReq.current) return;
+        setMiniWeek(result);
+      } else {
+        const result = await getHeatmap(s.space_id, from, to);
+        if (id !== miniReq.current) return;
+        setMiniForecast(result);
+      }
+    } catch (err) {
+      if (id !== miniReq.current) return;
+      setMiniError(errorMessage(err));
+    }
+    if (id === miniReq.current) setMiniLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (service) void loadMini(service, miniMode);
+  }, [service, miniMode, loadMini]);
+
+  const loadAvailability = useCallback(
+    async (spaceId: string, day: string, preselect?: { service: Service; start: string }) => {
     const id = ++availReq.current;
     adviceReq.current++;
+    setAdviceDismissed(false);
     setAvailLoading(true);
     setAvailError(null);
     setAvailability(null);
@@ -122,17 +198,24 @@ export default function ReservaScreen({ navigation }: Props) {
       const result = await getAvailability(spaceId, day);
       if (id !== availReq.current) return;
       setAvailability(result);
+      // Franja demanada per parametre o per cel·la del heatmap: nomes si esta disponible.
+      const wanted = preselect && result.slots.find((s) => s.start === preselect.start && s.available);
+      if (wanted && preselect) void pickSlot(wanted, preselect.service, day);
     } catch (err) {
       if (id !== availReq.current) return;
       setAvailError(errorMessage(err));
     }
     if (id === availReq.current) setAvailLoading(false);
-  }, []);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   function pickService(s: Service) {
     availReq.current++;
     adviceReq.current++;
     setService(s);
+    setAdviceDismissed(false);
     setDate(null);
     setAvailability(null);
     setAvailLoading(false);
@@ -152,9 +235,19 @@ export default function ReservaScreen({ navigation }: Props) {
     void loadAvailability(service.space_id, day);
   }
 
-  async function pickSlot(s: Slot) {
-    if (!service || !date) return;
+  // Cel·la del mini heatmap: selecciona dia i franja automaticament.
+  function pickCell(day: string, start: string) {
+    if (!service || submitting) return;
+    setDate(day);
+    setSubmitError(null);
+    void loadAvailability(service.space_id, day, { service, start });
+  }
+
+  // service/date explicits: pickSlot tambe es crida des de loadAvailability (estat encara no actualitzat).
+  async function pickSlot(s: Slot, svc: Service | null = service, day: string | null = date) {
+    if (!svc || !day) return;
     const id = ++adviceReq.current;
+    setAdviceDismissed(false);
     setSlot(s);
     setAdvice(null);
     setAdviceFailed(false);
@@ -163,8 +256,8 @@ export default function ReservaScreen({ navigation }: Props) {
     setSubmitError(null);
     try {
       const rec = await postRecommendations({
-        space_id: service.space_id,
-        date,
+        space_id: svc.space_id,
+        date: day,
         preferred_start: s.start,
         preferred_end: s.end,
       });
@@ -208,6 +301,39 @@ export default function ReservaScreen({ navigation }: Props) {
     }
   }
 
+  // Mini heatmap: files i cel·les vénen del backend; res es calcula aqui.
+  const mini = useMemo(() => {
+    const rowSet = new Set<string>();
+    const cells = new Map<string, CellValue>();
+    const full = new Set<string>();
+    let hasData = false;
+    if (miniMode === 'availability' && miniWeek) {
+      for (const day of miniWeek.days) {
+        for (const s of day.slots) {
+          rowSet.add(s.start);
+          cells.set(`${day.date}|${s.start}`, availabilityCell(s));
+          if (!s.available) full.add(`${day.date}|${s.start}`);
+          hasData = true;
+        }
+      }
+    } else if (miniMode === 'forecast' && miniForecast) {
+      for (const day of miniForecast.days) {
+        for (const s of day.slots) {
+          rowSet.add(s.hour);
+          cells.set(`${day.date}|${s.hour}`, forecastCell(s));
+          if (s.occupancy_level !== 'unknown') hasData = true;
+        }
+      }
+    }
+    return {
+      loaded: miniMode === 'availability' ? miniWeek !== null : miniForecast !== null,
+      hasData,
+      rows: Array.from(rowSet).sort(),
+      getCell: (d: string, r: string) => cells.get(`${d}|${r}`) ?? null,
+      isFull: (d: string, r: string) => full.has(`${d}|${r}`),
+    };
+  }, [miniMode, miniWeek, miniForecast]);
+
   // Alternativa recomanada pel backend: nomes si ja esta a la llista carregada i disponible.
   const recommended = advice?.recommended_slot ?? null;
   const altSlot =
@@ -231,10 +357,55 @@ export default function ReservaScreen({ navigation }: Props) {
         />
       ))}
 
-      {/* 2. Dia */}
+      {/* 2. Mini heatmap */}
       {service && (
         <>
-          <Text style={styles.step}>2. Dia</Text>
+          <Text style={styles.step}>2. Disponibilitat i previsió</Text>
+          <View style={styles.modeRow}>
+            <Option
+              label="Disponibilitat"
+              selected={miniMode === 'availability'}
+              disabled={submitting}
+              onPress={() => setMiniMode('availability')}
+            />
+            <Option
+              label="Previsió SAFi"
+              selected={miniMode === 'forecast'}
+              disabled={submitting}
+              onPress={() => setMiniMode('forecast')}
+            />
+          </View>
+          <Text style={styles.muted}>
+            {miniMode === 'availability'
+              ? 'Disponibilitat: reserves actuals. Toca una cel·la per triar-la.'
+              : 'Previsió SAFi: estimació històrica, no és ocupació en temps real.'}
+          </Text>
+          {miniLoading && <ActivityIndicator />}
+          {miniError && <ErrorBox text={miniError} onRetry={() => loadMini(service, miniMode)} />}
+          {!miniLoading && !miniError && mini.loaded && !mini.hasData && (
+            <Text style={styles.muted}>
+              {miniMode === 'forecast' ? 'Sense dades de previsió' : 'No hi ha franges per a aquests dies'}
+            </Text>
+          )}
+          {!miniLoading && !miniError && mini.loaded && mini.hasData && (
+            <HeatmapGrid
+              compact
+              dates={dayDates}
+              rows={mini.rows}
+              getCell={mini.getCell}
+              mode={miniMode}
+              onCellPress={pickCell}
+              isDisabled={mini.isFull}
+              selected={date && slot ? { date, row: slot.start } : null}
+            />
+          )}
+        </>
+      )}
+
+      {/* 3. Dia i hora */}
+      {service && (
+        <>
+          <Text style={styles.step}>3. Dia i hora</Text>
           {days.map((d) => (
             <Option
               key={d.date}
@@ -247,10 +418,9 @@ export default function ReservaScreen({ navigation }: Props) {
         </>
       )}
 
-      {/* 3. Hora */}
+      {/* Franges del dia */}
       {service && date && (
         <>
-          <Text style={styles.step}>3. Hora</Text>
           {availLoading && <ActivityIndicator />}
           {availError && (
             <ErrorBox text={availError} onRetry={() => loadAvailability(service.space_id, date)} />
@@ -261,7 +431,7 @@ export default function ReservaScreen({ navigation }: Props) {
           {availability?.slots.map((s) => (
             <Option
               key={`${s.start}-${s.end}`}
-              label={`${s.start}-${s.end}  ·  ocupació ${LEVEL_LABEL[s.occupancy_level]}${
+              label={`${s.start}-${s.end}  ·  previsió ${LEVEL_LABEL[s.occupancy_level]}${
                 s.available ? '' : '  ·  no disponible'
               }`}
               selected={slot?.start === s.start && slot?.end === s.end}
@@ -272,13 +442,43 @@ export default function ReservaScreen({ navigation }: Props) {
         </>
       )}
 
+      {/* Franja seleccionada: dos blocs separats */}
+      {slot && (
+        <View style={styles.infoRow}>
+          <View style={styles.infoBox}>
+            <Text style={styles.infoTitle}>Disponibilitat actual</Text>
+            <Text style={styles.infoMain}>{slot.available ? 'Disponible' : 'No disponible'}</Text>
+            <Text style={styles.infoSub}>
+              {slot.remaining_capacity != null
+                ? `${slot.remaining_capacity} places`
+                : 'Places: desconegudes'}
+            </Text>
+          </View>
+          <View style={styles.infoBox}>
+            <Text style={styles.infoTitle}>Previsió SAFi</Text>
+            <Text style={styles.infoMain}>Ocupació {LEVEL_LABEL[slot.occupancy_level]}</Text>
+            <Text style={styles.infoSub}>
+              {slot.occupancy_score != null ? `${slot.occupancy_score} / 100` : 'Puntuació desconeguda'}
+            </Text>
+          </View>
+        </View>
+      )}
+
       {/* 4. Avis SAFi + 5. Confirmar */}
       {slot && (
         <>
           <Text style={styles.step}>4. SAFi</Text>
           {adviceLoading && <ActivityIndicator />}
-          {advice && (
+          {advice && !adviceDismissed && (
             <View style={styles.safiBox}>
+              <Pressable
+                style={styles.dismiss}
+                hitSlop={10}
+                accessibilityLabel="Tancar l'avís de SAFi"
+                onPress={() => setAdviceDismissed(true)}
+              >
+                <Text style={styles.dismissText}>✕</Text>
+              </Pressable>
               <Text style={styles.safiTitle}>SAFi</Text>
               <Text style={styles.safiText}>{advice.message}</Text>
               {altSlot && (
@@ -295,8 +495,16 @@ export default function ReservaScreen({ navigation }: Props) {
               )}
             </View>
           )}
-          {adviceNoData && (
+          {adviceNoData && !adviceDismissed && (
             <View style={styles.safiBox}>
+              <Pressable
+                style={styles.dismiss}
+                hitSlop={10}
+                accessibilityLabel="Tancar l'avís de SAFi"
+                onPress={() => setAdviceDismissed(true)}
+              >
+                <Text style={styles.dismissText}>✕</Text>
+              </Pressable>
               <Text style={styles.safiTitle}>SAFi</Text>
               <Text style={styles.safiText}>{adviceNoData}</Text>
             </View>
@@ -357,6 +565,14 @@ const styles = StyleSheet.create({
   retryButton: { padding: 12, borderRadius: 10, backgroundColor: '#eee', alignItems: 'center' },
   retryText: { fontSize: 16 },
   safiBox: { padding: 14, borderRadius: 12, backgroundColor: '#f3e8ff', borderWidth: 1, borderColor: '#9c27b0' },
+  dismiss: { position: 'absolute', top: 8, right: 10, zIndex: 1 },
+  dismissText: { fontSize: 18, color: '#6a1b9a' },
+  modeRow: { flexDirection: 'row', gap: 8 },
+  infoRow: { flexDirection: 'row', gap: 8, marginTop: 16 },
+  infoBox: { flex: 1, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#ccc' },
+  infoTitle: { fontSize: 12, color: '#666', marginBottom: 4 },
+  infoMain: { fontSize: 15, fontWeight: 'bold' },
+  infoSub: { fontSize: 14, color: '#444', marginTop: 2 },
   safiTitle: { fontWeight: 'bold', color: '#6a1b9a', marginBottom: 4 },
   safiText: { fontSize: 16 },
   altButton: { marginTop: 12, padding: 12, borderRadius: 10, backgroundColor: '#9c27b0', alignItems: 'center' },
