@@ -25,6 +25,13 @@ from app.services.recommendation_analytics_service import (
     get_recommendation_stats,
 )
 
+from app.services.llm_service import (
+    chat_with_ornith,
+    llm_available,
+)
+
+import httpx
+
 
 router = APIRouter(prefix="/api/v1")
 
@@ -217,6 +224,45 @@ def get_safi_advice(payload: SAFiAdviceRequest) -> dict[str, Any]:
 def chat_with_safi(payload: SAFiChatRequest) -> dict[str, Any]:
     return success(chat(payload.message))
 
+@router.post("/safi/chat-llm")
+def chat_with_safi_llm(
+    payload: SAFiChatRequest,
+) -> dict[str, Any]:
+
+    if not llm_available():
+        raise ApiError(
+            "LLM_NOT_CONFIGURED",
+            "UTH_KEY is not configured.",
+            503,
+        )
+
+    try:
+        message = chat_with_ornith(
+            payload.message
+        )
+
+    except httpx.HTTPError as exc:
+        raise ApiError(
+            "LLM_UNAVAILABLE",
+            "The SAFi LLM is currently unavailable.",
+            503,
+        ) from exc
+
+    except RuntimeError as exc:
+        raise ApiError(
+            "LLM_ERROR",
+            str(exc),
+            500,
+        ) from exc
+
+    return success(
+        {
+            "message": message,
+            "sources": [],
+            "can_answer": True,
+            "provider": "uab-ornith",
+        }
+    )
 
 @router.get("/availability/heatmap")
 def get_availability_heatmap(
