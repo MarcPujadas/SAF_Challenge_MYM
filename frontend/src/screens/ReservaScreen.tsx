@@ -106,7 +106,7 @@ export default function ReservaScreen({ navigation, route }: Props) {
 
   // Envia l'accio en segon pla: no bloqueja ni mostra errors a l'usuari.
   function sendRecommendationAction(rec: Recommendation | null, action: 'accepted' | 'ignored') {
-    if (!rec || !rec.recommended_slot) return;
+    if (!rec || !rec.recommended_slot || !rec.recommendation_id) return;
     if (actedRecs.current.has(rec.recommendation_id)) return;
     actedRecs.current.add(rec.recommendation_id);
     postRecommendationAction(rec.recommendation_id, action).catch(() => {});
@@ -262,6 +262,11 @@ export default function ReservaScreen({ navigation, route }: Props) {
         preferred_end: s.end,
       });
       if (id !== adviceReq.current) return;
+      if (rec.recommendation_available === false) {
+        setAdvice(null);
+        setAdviceNoData(null);
+        return;
+      }
       setAdvice(rec);
     } catch (err) {
       if (id !== adviceReq.current) return;
@@ -487,7 +492,10 @@ export default function ReservaScreen({ navigation, route }: Props) {
                   disabled={submitting}
                   onPress={() => {
                     sendRecommendationAction(advice, 'accepted');
-                    void pickSlot(altSlot);
+                    setSlot(altSlot);
+                    setAdvice(null);
+                    setAdviceNoData(null);
+                    setAdviceFailed(false);
                   }}
                 >
                   <Text style={styles.altButtonText}>Canviar a {altSlot.start}</Text>
