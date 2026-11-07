@@ -15,6 +15,7 @@ class ServiceConfig:
     space_id: str
     search_phrases: tuple[str, ...]
     slot_duration_minutes: int = GENERAL_SLOT_DURATION_MINUTES
+    safi_recommendations: bool = True
 
 
 SERVICES = (
@@ -56,6 +57,7 @@ SERVICES = (
         "pistes-de-padel-pista-1",
         ("padel",),
         STANDARD_SLOT_DURATION_MINUTES,
+        safi_recommendations=False,
     ),
     ServiceConfig(
         "tennis",
@@ -64,6 +66,7 @@ SERVICES = (
         "tennis-tennis-1",
         ("tennis", "tenis"),
         STANDARD_SLOT_DURATION_MINUTES,
+        safi_recommendations=False,
     ),
     ServiceConfig(
         "squash",
@@ -72,6 +75,7 @@ SERVICES = (
         "esquaix-esquaix-2",
         ("esquaix", "squash"),
         STANDARD_SLOT_DURATION_MINUTES,
+        safi_recommendations=False,
     ),
     ServiceConfig(
         "football",
@@ -79,6 +83,7 @@ SERVICES = (
         "Camps de futbol",
         "futbol-7-camp-1",
         ("futbol", "football"),
+        safi_recommendations=False,
     ),
     ServiceConfig(
         "guided-activities",
@@ -96,6 +101,7 @@ SERVICES = (
 )
 
 SERVICE_BY_ID = {service.service_id: service for service in SERVICES}
+SERVICE_BY_SPACE_ID = {service.space_id: service for service in SERVICES}
 SPACE_ID_BY_SERVICE_ID = {
     service.service_id: service.space_id for service in SERVICES
 }
@@ -115,6 +121,11 @@ SERVICE_SEARCH_PHRASES = tuple(
         reverse=True,
     )
 )
+
+
+def supports_safi_recommendations(space_id: str) -> bool:
+    service = SERVICE_BY_SPACE_ID.get(space_id)
+    return service is None or service.safi_recommendations
 
 
 def services_for_database() -> list[dict[str, str]]:
