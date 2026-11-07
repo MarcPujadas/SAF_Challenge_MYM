@@ -440,10 +440,6 @@ def test_best_day_alternative_returns_none_without_better_day_or_data(
         ("fitness", FITNESS_SPACE_ID),
         ("piscina de 25 m", POOL_SPACE_ID),
         ("piscina de 16 m", "piscina-de-16-metres"),
-        ("pàdel", "pistes-de-padel-pista-1"),
-        ("tennis", TENNIS_SPACE_ID),
-        ("esquaix", "esquaix-esquaix-2"),
-        ("futbol", "futbol-7-camp-1"),
         ("activitats dirigides", "sales-activitats-dirigides-sala-1"),
     ],
 )
@@ -480,6 +476,19 @@ def test_safi_chat_answers_supported_services_and_detects_weekday_time(
     assert result["sources"][0]["date_reference"] == "dimarts"
     assert recommend.call_args.args[0] == expected_space_id
     assert recommend.call_args.args[2] == "09:00"
+
+
+def test_safi_chat_does_not_recommend_court_services():
+    for phrase in ("pàdel", "tennis", "esquaix", "futbol"):
+        with patch.object(safi_service, "recommend") as recommend:
+            result = safi_service.chat(
+                f"Quan hi ha menys ocupació al {phrase} dimarts a les 9:00?"
+            )
+
+        assert result["can_answer"] is False
+        assert "no ofereix recomanacions" in result["message"]
+        assert result["sources"] == []
+        recommend.assert_not_called()
 
 
 def test_safi_chat_returns_unknown_when_supported_service_has_no_data():
