@@ -5,28 +5,27 @@ import type { RootStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Confirmacion'>;
 
-const STATUS_LABEL: Record<string, string> = {
-  confirmed: 'confirmada',
-  cancelled: 'cancel·lada',
-};
-
 export default function ConfirmacionScreen({ navigation, route }: Props) {
   const { reservation, spaceName } = route.params;
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Reserva creada</Text>
+      <Text style={styles.check}>✓</Text>
+      <Text style={styles.title}>Reserva confirmada</Text>
+      <Text style={styles.subtitle}>La reserva s'ha guardat correctament.</Text>
 
       <View style={styles.card}>
         <Row label="Espai" value={spaceName} />
         <Row label="Data" value={reservation.date} />
         <Row label="Hora" value={`${reservation.start}-${reservation.end}`} />
-        <Row label="Reserva" value={reservation.reservation_id} />
-        <Row label="Estat" value={STATUS_LABEL[reservation.status] ?? reservation.status} />
+        <Row label="ID" value={reservation.reservation_id} />
       </View>
 
-      <Pressable style={styles.button} onPress={() => navigation.popToTop()}>
-        <Text style={styles.buttonText}>Tornar a l'inici</Text>
+      <Pressable style={styles.button} onPress={() => navigation.navigate('MevesReserves')}>
+        <Text style={styles.buttonText}>Veure les meves reserves</Text>
+      </Pressable>
+      <Pressable style={styles.secondary} onPress={() => navigation.popToTop()}>
+        <Text style={styles.secondaryText}>Tornar a l'inici</Text>
       </Pressable>
     </View>
   );
@@ -43,11 +42,15 @@ function Row({ label, value }: { label: string; value: string }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 24, justifyContent: 'center' },
-  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 24, textAlign: 'center' },
-  card: { borderRadius: 12, borderWidth: 1, borderColor: '#ddd', padding: 16, marginBottom: 32 },
-  row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6 },
-  label: { color: '#666', fontSize: 16 },
-  value: { fontSize: 16, fontWeight: '600' },
+  check: { fontSize: 52, color: '#2e7d32', textAlign: 'center', fontWeight: 'bold' },
+  title: { fontSize: 26, fontWeight: 'bold', marginTop: 6, textAlign: 'center' },
+  subtitle: { fontSize: 16, color: '#666', textAlign: 'center', marginTop: 4, marginBottom: 24 },
+  card: { borderRadius: 12, borderWidth: 1, borderColor: '#ddd', padding: 16, marginBottom: 20 },
+  row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, gap: 12 },
+  label: { color: '#666', fontSize: 15 },
+  value: { flex: 1, textAlign: 'right', fontSize: 15, fontWeight: '600' },
   button: { paddingVertical: 16, borderRadius: 12, backgroundColor: '#1565c0', alignItems: 'center' },
-  buttonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  buttonText: { color: '#fff', fontSize: 17, fontWeight: 'bold' },
+  secondary: { marginTop: 10, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: '#1565c0', alignItems: 'center' },
+  secondaryText: { color: '#1565c0', fontSize: 16, fontWeight: 'bold' },
 });
