@@ -67,47 +67,7 @@ def init_db() -> None:
             ("demo-user", "Usuari Demo"),
         )
 
-        spaces = [
-            ("fitness", "Sala Fitness", "fitness", 120, 1),
-            ("pool", "Piscina", "pool", 40, 1),
-            ("padel-1", "Pista de pàdel 1", "court", 1, 1),
-        ]
-        connection.executemany(
-            """
-            INSERT OR IGNORE INTO spaces (id, name, type, capacity, reservable)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            spaces,
-        )
+        
 
-        services = [
-            (
-                "fitness",
-                "Fitness",
-                "Sala de fitness del SAF",
-                "fitness",
-                1,
-            ),
-            (
-                "pool",
-                "Piscina",
-                "Accés a la piscina del SAF",
-                "pool",
-                1,
-            ),
-            (
-                "padel",
-                "Pàdel",
-                "Reserva d'una pista de pàdel",
-                "padel-1",
-                1,
-            ),
-        ]
-        connection.executemany(
-            """
-            INSERT OR IGNORE INTO services
-                (id, name, description, space_id, reservable)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            services,
-        )
+        
+        
