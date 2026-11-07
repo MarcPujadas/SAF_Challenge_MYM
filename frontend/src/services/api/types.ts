@@ -62,7 +62,7 @@ export type RecommendationSlot = {
 };
 
 export type Recommendation = {
-  recommendation_id: string;
+  recommendation_id: string | null;
   requested_slot: RecommendationSlot;
   recommended_slot: RecommendationSlot | null; // null si no hi ha alternativa (regla 7)
   message: string;
@@ -70,8 +70,10 @@ export type Recommendation = {
   basis: {
     space_id: string;
     weekday: string;
-    historical_period: string;
+    historical_period: string | null;
   };
+  recommendation_available?: boolean;
+  unavailable_reason?: string | null;
 };
 
 // POST /recommendations/{recommendation_id}/action
@@ -163,12 +165,14 @@ export type SafiChatRequest = {
 
 export type SafiSource = {
   type: string;
-  space_id: string;
-  date_reference: string;
+  space_id?: string;
+  space_ids?: string[];
+  date_reference?: string;
 };
 
 export type SafiChatResponse = {
   message: string;
   sources: SafiSource[];
   can_answer: boolean;
+  provider?: string;
 };
