@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from app import main
 from app.database import database
+from scripts.import_services import SERVICES, main as import_services
 
 
 FITNESS_SPACE_ID = "sala-fitnes-sala-cardio"
@@ -220,6 +221,57 @@ def test_services_and_availability(
         assert slot["available"] is True
         assert slot["occupancy_score"] == 60
         assert slot["occupancy_level"] == "medium"
+
+
+def test_services_include_configured_spaces_and_effective_reservability(
+    tmp_path,
+    monkeypatch,
+):
+    with make_client(tmp_path, monkeypatch) as client:
+        with database.get_connection() as connection:
+            for service in SERVICES:
+                connection.execute(
+                    """
+                    INSERT INTO spaces (
+                        id, name, type, capacity, reservable
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        service["space_id"],
+                        service["name"],
+                        "fitness" if service["id"] == "fitness" else "court",
+                        20,
+                        0 if service["id"] == "pool-16m" else 1,
+                    ),
+                )
+        import_services()
+
+        response = client.get("/api/v1/services")
+
+        assert response.status_code == 200
+        services = response.json()["data"]
+        expected = {service["id"]: service for service in SERVICES}
+        assert {service["id"] for service in services} == set(expected)
+        assert len(services) == len(expected)
+        assert len({service["id"] for service in services}) == len(services)
+        with database.get_connection() as connection:
+            existing_space_ids = {
+                row["id"]
+                for row in connection.execute("SELECT id FROM spaces")
+            }
+        assert all(service["space_id"] for service in services)
+        assert all(
+            service["space_id"] in existing_space_ids
+            for service in services
+        )
+        assert all(
+            service["space_id"] == expected[service["id"]]["space_id"]
+            for service in services
+        )
+        assert next(
+            service for service in services if service["id"] == "pool-16m"
+        )["reservable"] is False
 
 
 def test_create_and_list_reservation(
@@ -446,8 +498,149 @@ def test_cancel_reservation(
 
         reservations = listed.json()["data"]
 
-        assert len(reservations) == 1
-        assert reservations[0]["status"] == "cancelled"
+        assert reservations == []
+        with database.get_connection() as connection:
+            stored = connection.execute(
+                "SELECT status FROM reservations WHERE id = ?",
+                (reservation_id,),
+            ).fetchone()
+        assert stored["status"] == "cancelled"
+
+
+def test_week_availability_includes_all_days_and_uses_sqlite_only(
+    tmp_path,
+    monkeypatch,
+):
+    with make_client(tmp_path, monkeypatch) as client:
+        seed_test_data()
+        with monkeypatch.context() as patcher:
+            patcher.setattr(
+                main,
+                "get_historical_occupancy",
+                lambda **_: (_ for _ in ()).throw(
+                    AssertionError("weekly availability must not use history")
+                ),
+            )
+            response = client.get(
+                "/api/v1/availability/week",
+                params={
+                    "space_id": TENNIS_SPACE_ID,
+                    "from": "2026-11-09",
+                    "to": "2026-11-15",
+                },
+            )
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["from"] == "2026-11-09"
+        assert data["to"] == "2026-11-15"
+        assert [day["date"] for day in data["days"]] == [
+            "2026-11-09",
+            "2026-11-10",
+            "2026-11-11",
+            "2026-11-12",
+            "2026-11-13",
+            "2026-11-14",
+            "2026-11-15",
+        ]
+        assert all(day["slots"] for day in data["days"])
+        assert all(
+            "occupancy_score" not in slot
+            and "occupancy_level" not in slot
+            for day in data["days"]
+            for slot in day["slots"]
+        )
+
+
+def test_week_availability_counts_reservations_and_full_slots(
+    tmp_path,
+    monkeypatch,
+):
+    with make_client(tmp_path, monkeypatch) as client:
+        seed_test_data()
+        available = client.get(
+            "/api/v1/availability/week",
+            params={
+                "space_id": TENNIS_SPACE_ID,
+                "from": "2026-11-10",
+                "to": "2026-11-10",
+            },
+        )
+        assert available.status_code == 200
+        free_slot = next(
+            slot
+            for slot in available.json()["data"]["days"][0]["slots"]
+            if slot["start"] == "07:15"
+        )
+        assert free_slot["available"] is True
+        assert free_slot["remaining_capacity"] == 1
+
+        created = client.post(
+            "/api/v1/reservations",
+            json={
+                "user_id": "demo-user",
+                "space_id": TENNIS_SPACE_ID,
+                "date": "2026-11-10",
+                "start": "07:15",
+                "end": "08:30",
+            },
+        )
+        assert created.status_code == 200
+
+        occupied = client.get(
+            "/api/v1/availability/week",
+            params={
+                "space_id": TENNIS_SPACE_ID,
+                "from": "2026-11-10",
+                "to": "2026-11-10",
+            },
+        )
+        full_slot = next(
+            slot
+            for slot in occupied.json()["data"]["days"][0]["slots"]
+            if slot["start"] == "07:15"
+        )
+        assert full_slot["available"] is False
+        assert full_slot["remaining_capacity"] == 0
+
+
+def test_week_availability_rejects_bad_dates_and_spaces(
+    tmp_path,
+    monkeypatch,
+):
+    with make_client(tmp_path, monkeypatch) as client:
+        seed_test_data()
+        invalid_date = client.get(
+            "/api/v1/availability/week",
+            params={
+                "space_id": TENNIS_SPACE_ID,
+                "from": "2026-02-30",
+                "to": "2026-03-01",
+            },
+        )
+        invalid_range = client.get(
+            "/api/v1/availability/week",
+            params={
+                "space_id": TENNIS_SPACE_ID,
+                "from": "2026-11-11",
+                "to": "2026-11-10",
+            },
+        )
+        invalid_space = client.get(
+            "/api/v1/availability/week",
+            params={
+                "space_id": "missing-space",
+                "from": "2026-11-10",
+                "to": "2026-11-10",
+            },
+        )
+
+    assert invalid_date.status_code == 400
+    assert invalid_date.json()["error"]["code"] == "INVALID_DATE"
+    assert invalid_range.status_code == 400
+    assert invalid_range.json()["error"]["code"] == "INVALID_DATE_RANGE"
+    assert invalid_space.status_code == 404
+    assert invalid_space.json()["error"]["code"] == "INVALID_SPACE"
 
 
 def test_general_opening_hours(
