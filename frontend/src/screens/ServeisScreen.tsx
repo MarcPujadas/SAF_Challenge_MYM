@@ -1,10 +1,12 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
+import { Button, Card, EmptyState, ErrorState, EstatTag, LoadingState, ScreenContainer } from '../components/ui';
 import type { RootStackParamList } from '../navigation/types';
 import { errorMessage, getServices } from '../services/api';
 import type { Service } from '../services/api';
+import { colors, spacing, typography } from '../theme/theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Serveis'>;
 
@@ -35,69 +37,51 @@ export default function ServeisScreen({ navigation }: Props) {
   }, [load]);
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      {loading && <ActivityIndicator />}
-      {error && (
-        <View>
-          <Text style={styles.error}>{error}</Text>
-          <Pressable style={styles.retryButton} onPress={() => void load()}>
-            <Text style={styles.retryText}>Tornar-ho a provar</Text>
-          </Pressable>
-        </View>
-      )}
+    <ScreenContainer>
+      {loading && <LoadingState lines={4} />}
+      {error && <ErrorState message={error} onRetry={() => void load()} />}
       {!loading && !error && services && services.length === 0 && (
-        <Text style={styles.muted}>No hi ha serveis disponibles</Text>
+        <EmptyState title="No hi ha serveis disponibles" icon="🏟️" />
       )}
       {services?.map((s) => (
-        <View key={s.id} style={styles.card}>
-          <Text style={styles.name}>{s.name}</Text>
+        <Card key={s.id} style={styles.card}>
+          <View style={styles.header}>
+            <Text style={styles.name}>{s.name}</Text>
+            <EstatTag label={s.reservable ? 'Reservable' : 'No reservable'} tone={s.reservable ? 'success' : 'neutral'} />
+          </View>
           <Text style={styles.description}>{s.description}</Text>
-          <Text style={s.reservable ? styles.reservable : styles.notReservable}>
-            {s.reservable ? 'Reservable' : 'No reservable'}
-          </Text>
+          {s.resource_count != null && (
+            <Text style={styles.meta}>
+              {s.resource_count === 1 ? '1 recurs' : `${s.resource_count} recursos`}
+            </Text>
+          )}
           <View style={styles.row}>
-            <Pressable
-              style={[styles.secondary, styles.flex]}
+            <Button
+              label="Veure disponibilitat"
+              variant="secondary"
+              style={styles.flex}
               onPress={() => navigation.navigate('Heatmap', { serviceId: s.id })}
-            >
-              <Text style={styles.secondaryText}>Veure disponibilitat</Text>
-            </Pressable>
+            />
             {s.reservable && (
-              <Pressable
-                style={[styles.primary, styles.flex]}
+              <Button
+                label="Reservar"
+                style={styles.flex}
                 onPress={() => navigation.navigate('Reserva', { serviceId: s.id })}
-              >
-                <Text style={styles.primaryText}>Reservar</Text>
-              </Pressable>
+              />
             )}
           </View>
-        </View>
+        </Card>
       ))}
-    </ScrollView>
+    </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 16, paddingBottom: 48 },
-  muted: { color: '#666', marginVertical: 8, textAlign: 'center' },
-  error: { color: '#b00020', marginVertical: 8 },
-  retryButton: { padding: 12, borderRadius: 10, backgroundColor: '#eee', alignItems: 'center' },
-  retryText: { fontSize: 16 },
-  card: { padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#ccc', marginBottom: 12 },
-  name: { fontSize: 18, fontWeight: 'bold' },
-  description: { fontSize: 15, color: '#444', marginTop: 4 },
-  reservable: { marginTop: 6, color: '#2e7d32', fontWeight: 'bold' },
-  notReservable: { marginTop: 6, color: '#666', fontWeight: 'bold' },
-  row: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  card: { marginBottom: spacing.md },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+  name: { ...typography.heading, flex: 1 },
+  description: { ...typography.body, color: colors.textMuted, marginTop: spacing.xs },
+  meta: { ...typography.caption, marginTop: spacing.xs },
+  row: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
   flex: { flex: 1 },
-  secondary: {
-    padding: 12,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: '#1565c0',
-    alignItems: 'center',
-  },
-  secondaryText: { color: '#1565c0', fontSize: 15, fontWeight: 'bold' },
-  primary: { padding: 12, borderRadius: 10, backgroundColor: '#1565c0', alignItems: 'center' },
-  primaryText: { color: '#fff', fontSize: 15, fontWeight: 'bold' },
 });

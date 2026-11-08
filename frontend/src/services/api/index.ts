@@ -2,8 +2,6 @@ import { request } from './client';
 import { USE_MOCKS } from './config';
 import * as mocks from './mocks';
 import type {
-  Availability,
-  AvailabilityWeek,
   Heatmap,
   Recommendation,
   RecommendationAction,
@@ -16,6 +14,8 @@ import type {
   SafiChatRequest,
   SafiChatResponse,
   Service,
+  ServiceAvailabilityWeek,
+  ServiceSpace,
 } from './types';
 
 // contracts.md: usuari de demo (no el "1" de tasks.md).
@@ -25,23 +25,26 @@ export function getServices(): Promise<Service[]> {
   return USE_MOCKS ? mocks.getServices() : request<Service[]>('GET', '/services');
 }
 
-export function getAvailability(spaceId: string, date: string): Promise<Availability> {
+// Subespais (recursos) d'un servei. Informatiu: l'usuari tria servei, no recurs.
+export function getServiceSpaces(serviceId: string): Promise<ServiceSpace[]> {
   return USE_MOCKS
-    ? mocks.getAvailability(spaceId, date)
-    : request<Availability>('GET', '/availability', { query: { space_id: spaceId, date } });
+    ? mocks.getServiceSpaces(serviceId)
+    : request<ServiceSpace[]>('GET', `/services/${encodeURIComponent(serviceId)}/spaces`);
 }
 
-// PROVISIONAL, pendent de contracts.md: GET /availability/week (tasques_v3.md 4.3).
-export function getAvailabilityWeek(
-  spaceId: string,
+// Disponibilitat actual agregada per servei (flux de Heatmap i Reserva).
+export function getServiceAvailabilityWeek(
+  serviceId: string,
   from: string,
   to: string,
-): Promise<AvailabilityWeek> {
+): Promise<ServiceAvailabilityWeek> {
   return USE_MOCKS
-    ? mocks.getAvailabilityWeek(spaceId, from, to)
-    : request<AvailabilityWeek>('GET', '/availability/week', {
-        query: { space_id: spaceId, from, to },
-      });
+    ? mocks.getServiceAvailabilityWeek(serviceId, from, to)
+    : request<ServiceAvailabilityWeek>(
+        'GET',
+        `/services/${encodeURIComponent(serviceId)}/availability/week`,
+        { query: { from, to } },
+      );
 }
 
 export function postRecommendations(req: RecommendationRequest): Promise<Recommendation> {
@@ -63,11 +66,12 @@ export function postRecommendationAction(
       );
 }
 
-export function getHeatmap(spaceId: string, from: string, to: string): Promise<Heatmap> {
+// Previsio historica per servei (GET /availability/heatmap?service_id=...).
+export function getHeatmap(serviceId: string, from: string, to: string): Promise<Heatmap> {
   return USE_MOCKS
-    ? mocks.getHeatmap(spaceId, from, to)
+    ? mocks.getHeatmap(serviceId, from, to)
     : request<Heatmap>('GET', '/availability/heatmap', {
-        query: { space_id: spaceId, from, to },
+        query: { service_id: serviceId, from, to },
       });
 }
 

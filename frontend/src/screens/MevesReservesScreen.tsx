@@ -1,11 +1,28 @@
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
+import {
+  Button,
+  Card,
+  Chip,
+  EmptyState,
+  ErrorState,
+  EstatTag,
+  LoadingState,
+  ScreenContainer,
+} from '../components/ui';
 import type { RootStackParamList } from '../navigation/types';
-import { cancelReservation, errorMessage, getReservations } from '../services/api';
+import {
+  cancelReservation,
+  errorMessage,
+  getReservations,
+  getServiceSpaces,
+  getServices,
+} from '../services/api';
 import type { ReservationItem, ReservationStatus } from '../services/api';
+import { colors, spacing, typography } from '../theme/theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MevesReserves'>;
 type ViewMode = 'active' | 'history';
@@ -24,7 +41,28 @@ export default function MevesReservesScreen(_props: Props) {
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [cancelOk, setCancelOk] = useState<string | null>(null);
+  // GET /reservations nomes retorna space_id/space_name; el servei s'obte creuant amb
+  // GET /services/{id}/spaces (opcional: si falla, es mostra nomes el recurs).
+  const [serviceBySpace, setServiceBySpace] = useState<Record<string, string>>({});
   const loadReq = useRef(0);
+  const namesReq = useRef(0);
+
+  const loadServiceNames = useCallback(async () => {
+    const id = ++namesReq.current;
+    try {
+      const services = await getServices();
+      const lists = await Promise.allSettled(services.map((svc) => getServiceSpaces(svc.id)));
+      if (id !== namesReq.current) return;
+      const map: Record<string, string> = {};
+      lists.forEach((res, i) => {
+        if (res.status !== 'fulfilled') return;
+        for (const space of res.value) map[space.space_id] = services[i].name;
+      });
+      setServiceBySpace(map);
+    } catch {
+      // Sense noms de servei: la llista mostra el recurs igualment.
+    }
+  }, []);
 
   const load = useCallback(async () => {
     const id = ++loadReq.current;
@@ -46,7 +84,8 @@ export default function MevesReservesScreen(_props: Props) {
       setCancelOk(null);
       setCancelError(null);
       void load();
-    }, [load]),
+      void loadServiceNames();
+    }, [load, loadServiceNames]),
   );
 
   async function cancel(reservationId: string) {
@@ -66,20 +105,10 @@ export default function MevesReservesScreen(_props: Props) {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScreenContainer>
       <View style={styles.tabs}>
-        <Pressable
-          style={[styles.tab, mode === 'active' && styles.tabSelected]}
-          onPress={() => setMode('active')}
-        >
-          <Text style={styles.tabText}>Actives</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.tab, mode === 'history' && styles.tabSelected]}
-          onPress={() => setMode('history')}
-        >
-          <Text style={styles.tabText}>Historial</Text>
-        </Pressable>
+        <Chip label="Actives" selected={mode === 'active'} onPress={() => setMode('active')} style={styles.flex} />
+        <Chip label="Historial" selected={mode === 'history'} onPress={() => setMode('history')} style={styles.flex} />
       </View>
 
       <Text style={styles.help}>
@@ -88,100 +117,87 @@ export default function MevesReservesScreen(_props: Props) {
           : 'Totes les reserves creades, incloses les cancel·lades.'}
       </Text>
 
-      {loading && <ActivityIndicator />}
-      {error && (
-        <View>
-          <Text style={styles.error}>{error}</Text>
-          <Pressable style={styles.retryButton} onPress={() => void load()}>
-            <Text style={styles.retryText}>Tornar-ho a provar</Text>
-          </Pressable>
-        </View>
-      )}
+      {loading && <LoadingState lines={3} />}
+      {error && <ErrorState message={error} onRetry={() => void load()} />}
       {cancelError && <Text style={styles.error}>{cancelError}</Text>}
       {cancelOk && <Text style={styles.ok}>{cancelOk}</Text>}
       {!loading && !error && items && items.length === 0 && (
-        <Text style={styles.muted}>
-          {mode === 'active' ? 'Encara no tens reserves actives' : 'Encara no hi ha historial de reserves'}
-        </Text>
+        <EmptyState
+          title={mode === 'active' ? 'Encara no tens reserves actives' : 'Encara no hi ha historial de reserves'}
+          icon="🎟️"
+        />
       )}
 
       {items?.map((reservation) => {
         const busy = cancellingId === reservation.reservation_id;
         return (
-          <View key={reservation.reservation_id} style={styles.card}>
+          <Card key={reservation.reservation_id} style={styles.card}>
             <View style={styles.cardHeader}>
-              <Text style={styles.space}>{reservation.space_name}</Text>
-              <Text style={reservation.status === 'confirmed' ? styles.confirmed : styles.cancelled}>
-                {STATUS_LABEL[reservation.status] ?? reservation.status}
+              <Text style={styles.space}>
+                {serviceBySpace[reservation.space_id] ?? reservation.space_name}
               </Text>
+              <EstatTag
+                label={STATUS_LABEL[reservation.status] ?? reservation.status}
+                tone={reservation.status === 'confirmed' ? 'success' : 'neutral'}
+              />
             </View>
             <Text style={styles.line}>
               {reservation.date} · {reservation.start}-{reservation.end}
             </Text>
+            <Text style={styles.sub}>Recurs: {reservation.space_name}</Text>
             <Text style={styles.id}>ID: {reservation.reservation_id}</Text>
 
             {reservation.status === 'confirmed' && askingId !== reservation.reservation_id && (
-              <Pressable
-                style={[styles.cancelButton, cancellingId !== null && styles.disabled]}
+              <Button
+                label="Cancel·lar"
+                variant="danger"
                 disabled={cancellingId !== null}
                 onPress={() => setAskingId(reservation.reservation_id)}
-              >
-                <Text style={styles.cancelText}>Cancel·lar</Text>
-              </Pressable>
+                style={styles.action}
+              />
             )}
 
             {reservation.status === 'confirmed' && askingId === reservation.reservation_id && (
-              <View>
+              <View style={styles.action}>
                 <Text style={styles.line}>Segur que vols cancel·lar aquesta reserva?</Text>
                 <View style={styles.row}>
-                  <Pressable
-                    style={[styles.cancelButton, styles.flex, busy && styles.disabled]}
+                  <Button
+                    label={busy ? 'Cancel·lant...' : 'Sí, cancel·lar'}
+                    variant="danger"
+                    loading={busy}
                     disabled={cancellingId !== null}
                     onPress={() => void cancel(reservation.reservation_id)}
-                  >
-                    <Text style={styles.cancelText}>{busy ? 'Cancel·lant...' : 'Sí, cancel·lar'}</Text>
-                  </Pressable>
-                  <Pressable
-                    style={[styles.keepButton, styles.flex, busy && styles.disabled]}
+                    style={styles.flex}
+                  />
+                  <Button
+                    label="No"
+                    variant="secondary"
                     disabled={cancellingId !== null}
                     onPress={() => setAskingId(null)}
-                  >
-                    <Text style={styles.keepText}>No</Text>
-                  </Pressable>
+                    style={styles.flex}
+                  />
                 </View>
               </View>
             )}
-          </View>
+          </Card>
         );
       })}
-    </ScrollView>
+    </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 16, paddingBottom: 48 },
-  tabs: { flexDirection: 'row', gap: 8 },
-  tab: { flex: 1, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#ccc', alignItems: 'center' },
-  tabSelected: { borderColor: '#1565c0', backgroundColor: '#e3f0ff' },
-  tabText: { fontWeight: 'bold' },
-  help: { color: '#666', marginVertical: 10 },
-  muted: { color: '#666', marginVertical: 8, textAlign: 'center' },
-  error: { color: '#b00020', marginVertical: 8 },
-  ok: { color: '#2e7d32', marginVertical: 8, fontWeight: 'bold' },
-  retryButton: { padding: 12, borderRadius: 10, backgroundColor: '#eee', alignItems: 'center' },
-  retryText: { fontSize: 16 },
-  card: { padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#ccc', marginBottom: 12 },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
-  space: { flex: 1, fontSize: 18, fontWeight: 'bold' },
-  line: { fontSize: 16, marginTop: 4 },
-  id: { fontSize: 12, color: '#777', marginTop: 5 },
-  confirmed: { color: '#2e7d32', fontWeight: 'bold' },
-  cancelled: { color: '#666', fontWeight: 'bold' },
-  row: { flexDirection: 'row', gap: 8 },
+  tabs: { flexDirection: 'row', gap: spacing.sm },
+  help: { ...typography.caption, marginVertical: spacing.md },
+  error: { color: colors.danger, marginVertical: spacing.sm, fontWeight: '600' },
+  ok: { color: colors.primaryDark, marginVertical: spacing.sm, fontWeight: '700' },
+  card: { marginBottom: spacing.md },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm },
+  space: { ...typography.heading, flex: 1 },
+  line: { ...typography.body, marginTop: spacing.sm },
+  sub: { ...typography.caption, fontSize: 14, marginTop: spacing.xs },
+  id: { ...typography.caption, fontSize: 12, marginTop: spacing.xs },
+  action: { marginTop: spacing.md },
+  row: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
   flex: { flex: 1 },
-  cancelButton: { marginTop: 10, padding: 12, borderRadius: 10, backgroundColor: '#b00020', alignItems: 'center' },
-  cancelText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  keepButton: { marginTop: 10, padding: 12, borderRadius: 10, backgroundColor: '#eee', alignItems: 'center' },
-  keepText: { fontSize: 16 },
-  disabled: { opacity: 0.4 },
 });
