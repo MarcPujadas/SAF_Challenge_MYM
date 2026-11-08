@@ -84,7 +84,7 @@ backend/
 │   └── test_core.py
 │
 ├── data/
-│   ├── raw/
+│   ├── local/
 │   └── processed/
 │
 ├── pytest.ini
@@ -92,22 +92,18 @@ backend/
 └── README.md
 ```
 
-Les carpetes `data/raw/` i `data/processed/` són locals i no s'han de publicar al repositori.
+Les carpetes `data/local/` i `data/processed/` són locals i no s'han de publicar al repositori.
 
 ---
 
 # 4. Dataset del SAF
 
-El backend utilitza el dataset proporcionat per al repte:
+Els importadors utilitzen aquests fitxers locals proporcionats per al repte:
 
 ```text
-saf-espais-2026-equips.xlsx
-```
-
-S'ha de col·locar manualment a:
-
-```text
-backend/data/raw/saf-espais-2026-equips.xlsx
+backend/data/local/saf-espais-2026-equips.xlsx
+backend/data/local/historical_occupancy.csv
+backend/data/local/guided_activity_sessions.csv
 ```
 
 ## Important
@@ -178,7 +174,7 @@ python -m scripts.import_spaces
 L'script llegeix:
 
 ```text
-data/raw/saf-espais-2026-equips.xlsx
+data/local/saf-espais-2026-equips.xlsx
 ```
 
 concretament el full:
@@ -249,13 +245,17 @@ Executar:
 python scripts/process_historical_data.py
 ```
 
-El procés utilitza principalment el full:
+El procés importa les reserves individuals del full:
 
 ```text
-Reserves per franja
+Reserves
 ```
 
-del dataset original.
+del XLSX local. No importa també `Reserves per franja`, perquè és un resum
+agregat de les mateixes reserves. Les activitats dirigides s'importen per
+separat des de `data/local/guided_activity_sessions.csv`; el CSV històric
+existent es manté com a font de compatibilitat per a les funcions antigues i
+no se suma com una segona font de reserves.
 
 Els recursos del SAF es normalitzen i es relacionen amb els `space_id` utilitzats pel nostre backend.
 
@@ -266,7 +266,7 @@ Els registres amb recursos ambigus es conserven a `historical_usage` com a
 El registry documenta la correcció de Pàdel Pista 2 i els vuit carrils de la
 piscina de 25 m. No s'infereixen subdivisions de camps de futbol.
 
-El resultat local es guarda a:
+La projecció compatible generada es guarda a:
 
 ```text
 backend/data/processed/historical_occupancy.csv

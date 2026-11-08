@@ -17,7 +17,7 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 HISTORICAL_PATH = (
     BASE_DIR
     / "data"
-    / "processed"
+    / "local"
     / "historical_occupancy.csv"
 )
 
@@ -114,6 +114,15 @@ def main():
         "Files:",
         len(historical)
     )
+
+    if "reservations" in historical.columns:
+        print(
+            "Volum legacy de reserves (no s'afegeix al nou import):",
+            pd.to_numeric(
+                historical["reservations"],
+                errors="coerce",
+            ).sum(),
+        )
 
     print(
         "Espais diferents:",

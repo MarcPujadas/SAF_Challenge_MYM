@@ -77,8 +77,9 @@ def main():
         if not gate["passed"]:
             print(
                 f"AVÍS: quality gate {service_id}: "
-                f"{gate['mapped_resources']}/"
-                f"{gate['minimum_expected']} recursos."
+                f"{gate['mapped_resources']} mapejats, "
+                f"{gate['historical_resources']} amb històric; "
+                f"mínim {gate['minimum_expected']}."
             )
 
 

@@ -243,6 +243,122 @@ def test_historical_import_is_idempotent_and_preserves_source_rows(
     assert app_live_history_count == 0
 
 
+def test_individual_reserve_sheet_keeps_each_reservation_as_raw_volume(
+    history_client, tmp_path
+):
+    workbook_path = tmp_path / "individual_reserves.xlsx"
+    reservations = pd.DataFrame(
+        [
+            {
+                "Recurs": "Pàdel/Padbol - Pista 2",
+                "DataUs": "2026-04-06",
+                "HoraInici": "18:30",
+                "HoraFi": "19:30",
+            },
+            {
+                "Recurs": "Fitness",
+                "DataUs": "2026-04-06",
+                "HoraInici": "19:45",
+                "HoraFi": "21:00",
+            },
+            {
+                "Recurs": "Espai Barbell (dl-dv)",
+                "DataUs": "2026-04-06",
+                "HoraInici": "17:00",
+                "HoraFi": "18:00",
+            },
+        ]
+    )
+    with pd.ExcelWriter(workbook_path) as writer:
+        reservations.to_excel(writer, sheet_name="Reserves", index=False)
+
+    with database.get_connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO spaces (id, name, type, capacity, reservable)
+            VALUES ('espai-barbell', 'Espai Barbell', 'other', 25, 1)
+            """
+        )
+
+    summary = process_historical_data.process_workbook(workbook_path)
+
+    assert summary["raw_rows"] == 3
+    with database.get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT raw_resource_name, raw_reservation_count, people_count,
+                   occupied_units, capacity_units_snapshot, service_id,
+                   space_id, mapping_status
+            FROM historical_usage
+            WHERE source_id = 'saf_reserves_2026'
+            ORDER BY raw_resource_name
+            """
+        ).fetchall()
+
+    padel_row = next(
+        row for row in rows
+        if row["raw_resource_name"] == "Pàdel/Padbol - Pista 2"
+    )
+    assert padel_row["raw_reservation_count"] == 1
+    assert padel_row["people_count"] is None
+    assert padel_row["occupied_units"] is None
+    assert padel_row["capacity_units_snapshot"] == 1
+    assert all(row["raw_reservation_count"] == 1 for row in rows)
+    review_row = next(
+        row for row in rows
+        if row["raw_resource_name"] == "Espai Barbell (dl-dv)"
+    )
+    assert review_row["mapping_status"] == "manual_review"
+    assert review_row["space_id"] == "espai-barbell"
+    assert review_row["service_id"] is None
+
+
+def test_actual_guided_session_columns_preserve_people_metrics(
+    history_client,
+):
+    frame = pd.DataFrame(
+        [
+            {
+                "session_id": "ga-test-1",
+                "session_date": "2026-04-01",
+                "room": "sala 1",
+                "start_time": "12:00",
+                "end_time": "12:50",
+                "capacity": 35,
+                "peak_enrolled": 25,
+                "peak_occupancy_pct": 71,
+            },
+            {
+                "session_id": "ga-test-2",
+                "session_date": "2026-04-01",
+                "room": "sala 4",
+                "start_time": "18:00",
+                "end_time": "18:50",
+                "capacity": 30,
+                "peak_enrolled": 21,
+                "peak_occupancy_pct": 70,
+            },
+        ]
+    )
+    with database.get_connection() as connection:
+        rows = process_historical_data.normalize_guided_activity_rows(
+            frame,
+            source_checksum="guided-test-checksum",
+            connection=connection,
+        )
+
+    mapped, manual_review = rows
+    assert mapped["raw_resource_name"] == "sala 1"
+    assert mapped["space_id"] == "sales-activitats-dirigides-sala-1"
+    assert mapped["people_count"] == 25
+    assert mapped["capacity_people_snapshot"] == 35
+    assert mapped["occupancy_ratio"] == 0.71
+    assert mapped["raw_reservation_count"] is None
+    assert manual_review["mapping_status"] == "manual_review"
+    assert manual_review["raw_resource_name"] == "sala 4"
+    assert manual_review["people_count"] == 21
+
+
 def test_historical_quality_report_measures_row_and_volume_coverage(
     history_client, tmp_path
 ):
@@ -263,6 +379,14 @@ def test_historical_quality_report_measures_row_and_volume_coverage(
     assert report["mapped_reservation_volume"] == 16
     assert report["coverage_by_rows_percentage"] == 60.0
     assert report["coverage_by_reservation_volume_percentage"] == 76.19
+    assert report["padel_pista_2"] == {
+        "space_id": "pistes-de-padel-pista-2",
+        "linked": True,
+        "virtual": True,
+        "historical_rows": 1,
+        "reservation_volume": 7.0,
+        "recovered": True,
+    }
     assert report["service_summary"]["pool-25m"] == {
         "mapped_resources": 1,
         "expected_resources": 8,

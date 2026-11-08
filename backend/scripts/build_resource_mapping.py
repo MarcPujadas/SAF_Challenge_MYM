@@ -10,7 +10,7 @@ from app.config.resource_mapping import (
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-FILE_PATH = BASE_DIR / "data" / "raw" / "saf-espais-2026-equips.xlsx"
+FILE_PATH = BASE_DIR / "data" / "local" / "saf-espais-2026-equips.xlsx"
 
 
 def normalize_text(text):

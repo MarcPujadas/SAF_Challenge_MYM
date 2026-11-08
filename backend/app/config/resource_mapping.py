@@ -87,6 +87,11 @@ RESOURCE_ALIAS_REGISTRY = (
         "piscina-25-metres-carrer-{number}",
     ),
     ResourceAliasRule(
+        "pool-25m",
+        r"\bpiscina\b.*\b25m\b.*\bc\s+(?P<number>\d+)\b",
+        "piscina-25-metres-carrer-{number}",
+    ),
+    ResourceAliasRule(
         "pool-16m",
         r"\b(?:p\s+16m|piscina\s+(?:de\s+)?16\s*m?)\b",
         "piscina-de-16-metres",
@@ -104,7 +109,7 @@ RESOURCE_SERVICE_HINTS = (
     (r"\b(?:tennis|pickleball|pikleball)\b", "tennis"),
     (r"\b(?:esquaix|squash|c\s+soccer)\b", "squash"),
     (r"\b(?:futbol|football)\s+7\b", "football"),
-    (r"\b(?:p\s+25m|piscina\s+(?:de\s+)?25\s*m?)\b", "pool-25m"),
+    (r"\b(?:p\s+25m|piscina\b.*\b25m\b|piscina\s+(?:de\s+)?25\s*m?)\b", "pool-25m"),
     (r"\b(?:p\s+16m|piscina\s+(?:de\s+)?16\s*m?)\b", "pool-16m"),
     (r"\b(?:activitats\s+dirigides|ritmes|zen)\b", "guided-activities"),
     (r"\b(?:sala\s+)?fitnes(?:s)?\b", "fitness"),
@@ -168,9 +173,48 @@ def resolve_resource_mapping(raw_resource_name: object) -> ResourceMappingResult
             None, None, "ignored", "unknown", None, raw_name
         )
 
+    if raw_name is not None:
+        normalized_id = normalize_resource_name(raw_name)
+        for (service_id, space_id), resource in SERVICE_SPACE_BY_KEY.items():
+            if normalize_resource_name(space_id) == normalized_id:
+                return ResourceMappingResult(
+                    service_id,
+                    space_id,
+                    "mapped",
+                    resource.capacity_mode,
+                    1.0,
+                    raw_name,
+                )
+
+    football_parent = re.search(
+        r"\b(?:futbol|football)\s+7\b.*\bcamp\s+(?P<number>\d+)"
+        r"(?:\s+(?P<subdivision>[12]))?\b",
+        normalized,
+    )
+    explicit_half = bool(
+        re.search(r"\b(?:mitja|mig|half)\b", normalized)
+        or re.search(r"\b\d+\s+1\s+2\s+camp\b", normalized)
+        or re.search(r"\bcamp\s+\d+\s+[12]\s+1\s+2\b", normalized)
+    )
+    if football_parent is not None and explicit_half:
+        mapped = _mapping_for(
+            "football",
+            f"futbol-7-camp-{football_parent.group('number')}",
+            raw_resource_name,
+        )
+        if mapped is not None:
+            return ResourceMappingResult(
+                mapped.service_id,
+                mapped.space_id,
+                "mapped",
+                mapped.capacity_mode,
+                0.5,
+                raw_name,
+            )
     is_football_subdivision = (
-        "futbol 7" in normalized or "football 7" in normalized
-    ) and re.search(r"\b(mitja|mig|half|1 2)\b", normalized)
+        ("futbol 7" in normalized or "football 7" in normalized)
+        and explicit_half
+    )
     if not is_football_subdivision:
         for rule in RESOURCE_ALIAS_REGISTRY:
             match = re.search(rule.pattern, normalized)

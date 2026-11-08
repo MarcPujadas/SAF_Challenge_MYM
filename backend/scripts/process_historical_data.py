@@ -3,13 +3,17 @@ from __future__ import annotations
 import hashlib
 import math
 import re
+from dataclasses import replace
 from datetime import date as date_type
 from datetime import datetime, time, timedelta
 from pathlib import Path
 
 import pandas as pd
 
-from app.config.resource_mapping import resolve_resource_mapping
+from app.config.resource_mapping import (
+    normalize_resource_name,
+    resolve_resource_mapping,
+)
 from app.database.database import get_connection, init_db
 from app.database.historical_usage import (
     register_data_source,
@@ -18,7 +22,10 @@ from app.database.historical_usage import (
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-FILE_PATH = BASE_DIR / "data" / "raw" / "saf-espais-2026-equips.xlsx"
+FILE_PATH = BASE_DIR / "data" / "local" / "saf-espais-2026-equips.xlsx"
+GUIDED_ACTIVITIES_PATH = (
+    BASE_DIR / "data" / "local" / "guided_activity_sessions.csv"
+)
 OUTPUT_PATH = BASE_DIR / "data" / "processed" / "historical_occupancy.csv"
 LEGACY_COLUMNS = [
     "space_id",
@@ -102,11 +109,10 @@ def _capacity_snapshots(connection, service_id, space_id, capacity_mode):
             service_spaces.person_capacity,
             service_spaces.reservation_capacity,
             spaces.capacity AS space_capacity
-        FROM spaces
-        LEFT JOIN service_spaces
-            ON service_spaces.service_id = ?
-            AND service_spaces.space_id = spaces.id
-        WHERE spaces.id = ?
+        FROM service_spaces
+        LEFT JOIN spaces ON spaces.id = service_spaces.space_id
+        WHERE service_spaces.service_id = ?
+            AND service_spaces.space_id = ?
         """,
         (service_id, space_id),
     ).fetchone()
@@ -119,6 +125,20 @@ def _capacity_snapshots(connection, service_id, space_id, capacity_mode):
         person_capacity,
         row["reservation_capacity"],
     )
+
+
+def _known_space_aliases(connection) -> dict[str, str]:
+    candidates: dict[str, set[str]] = {}
+    for row in connection.execute("SELECT id, name FROM spaces"):
+        for value in (row["id"], row["name"]):
+            normalized = normalize_resource_name(value)
+            if normalized:
+                candidates.setdefault(normalized, set()).add(row["id"])
+    return {
+        normalized: next(iter(space_ids))
+        for normalized, space_ids in candidates.items()
+        if len(space_ids) == 1
+    }
 
 
 def normalize_source_rows(
@@ -137,12 +157,19 @@ def normalize_source_rows(
             + ", ".join(sorted(missing))
         )
 
+    known_space_aliases = _known_space_aliases(connection)
     rows = []
     for row_number, (_, row) in enumerate(frame.iterrows(), start=2):
         raw_resource_name = (
             None if pd.isna(row["Recurs"]) else str(row["Recurs"])
         )
         mapping = resolve_resource_mapping(raw_resource_name)
+        if mapping.space_id is None and raw_resource_name is not None:
+            existing_space_id = known_space_aliases.get(
+                normalize_resource_name(raw_resource_name)
+            )
+            if existing_space_id is not None:
+                mapping = replace(mapping, space_id=existing_space_id)
         date = _date_value(row["DataUs"])
         raw_count, raw_value = _numeric_count(row["Reserves"])
         capacity_people, capacity_units = _capacity_snapshots(
@@ -179,6 +206,115 @@ def normalize_source_rows(
                 "occupancy_ratio": None,
                 "raw_resource_name": raw_resource_name,
                 "capacity_mode": mapping.capacity_mode,
+                "mapping_status": mapping.mapping_status,
+                "capacity_share": mapping.capacity_share,
+            }
+        )
+    return rows
+
+
+def normalize_guided_activity_rows(
+    frame: pd.DataFrame,
+    *,
+    source_checksum: str,
+    connection,
+) -> list[dict]:
+    if "date" not in frame.columns and "session_date" in frame.columns:
+        frame = frame.rename(columns={"session_date": "date"})
+    required = {
+        "date",
+        "start_time",
+        "end_time",
+        "room",
+        "capacity",
+        "peak_enrolled",
+    }
+    missing = required - set(frame.columns)
+    if missing:
+        raise ValueError(
+            "Missing required columns in guided activities: "
+            + ", ".join(sorted(missing))
+        )
+
+    known_space_aliases = _known_space_aliases(connection)
+    rows = []
+    for row_number, (_, row) in enumerate(frame.iterrows(), start=2):
+        room = None if pd.isna(row["room"]) else str(row["room"]).strip()
+        raw_resource_name = room
+        mapping = resolve_resource_mapping(
+            f"{room} - Activitats dirigides"
+            if room
+            else "Activitats dirigides - ubicació desconeguda"
+        )
+        if mapping.space_id is None and room:
+            normalized_room = normalize_resource_name(room)
+            existing_space_id = known_space_aliases.get(
+                normalized_room
+            )
+            if existing_space_id is None and re.fullmatch(
+                r"sala\s+\d+",
+                normalized_room,
+            ):
+                existing_space_id = known_space_aliases.get(
+                    normalize_resource_name(
+                        f"sales activitats dirigides {room}"
+                    )
+                )
+            if existing_space_id is not None:
+                mapping = replace(mapping, space_id=existing_space_id)
+        if mapping.service_id is None:
+            mapping = mapping.__class__(
+                "guided-activities",
+                None,
+                "manual_review",
+                "unknown",
+                None,
+                raw_resource_name,
+            )
+        date = _date_value(row["date"])
+        people_count, _ = _numeric_count(row["peak_enrolled"])
+        capacity_people, _ = _numeric_count(row["capacity"])
+        occupancy_percent, _ = _numeric_count(
+            row.get("peak_occupancy_pct")
+        )
+        session_id = row.get("session_id")
+        source_record_key = (
+            str(session_id)
+            if not pd.isna(session_id)
+            else f"session-row:{row_number}"
+        )
+        rows.append(
+            {
+                "source_id": "saf_guided_activities_2026",
+                "source_checksum": source_checksum,
+                "source_record_key": source_record_key,
+                "service_id": mapping.service_id,
+                "space_id": mapping.space_id,
+                "date": date,
+                "weekday": (
+                    int(pd.Timestamp(date).dayofweek)
+                    if date is not None
+                    else None
+                ),
+                "start_time": _time_value(row["start_time"]),
+                "end_time": _time_value(row["end_time"]),
+                "raw_reservation_count": None,
+                "raw_reservation_value": None,
+                "people_count": people_count,
+                "occupied_units": None,
+                "capacity_people_snapshot": capacity_people,
+                "capacity_units_snapshot": None,
+                "occupancy_ratio": (
+                    float(occupancy_percent) / 100
+                    if occupancy_percent is not None
+                    else None
+                ),
+                "raw_resource_name": raw_resource_name,
+                "capacity_mode": (
+                    mapping.capacity_mode
+                    if mapping.mapping_status == "mapped"
+                    else "people"
+                ),
                 "mapping_status": mapping.mapping_status,
                 "capacity_share": mapping.capacity_share,
             }
@@ -257,19 +393,47 @@ def process_workbook(file_path: Path = FILE_PATH) -> dict:
 
     checksum = hashlib.sha256(file_path.read_bytes()).hexdigest()
     workbook = pd.ExcelFile(file_path)
+    frames = {
+        sheet_name: pd.read_excel(workbook, sheet_name=sheet_name)
+        for sheet_name in workbook.sheet_names
+    }
+    has_individual_reservations = any(
+        sheet_name.strip().casefold() == "reserves"
+        and {"Recurs", "DataUs", "HoraInici"}.issubset(frame.columns)
+        for sheet_name, frame in frames.items()
+    )
     source_rows_by_id: dict[str, list[dict]] = {}
 
     with get_connection() as connection:
-        for sheet_name in workbook.sheet_names:
-            frame = pd.read_excel(workbook, sheet_name=sheet_name)
+        for sheet_name, frame in frames.items():
             required_columns = {
                 "Recurs",
                 "DataUs",
                 "HoraInici",
                 "Reserves",
             }
+            if (
+                has_individual_reservations
+                and "reserves per franja" in sheet_name.casefold()
+            ):
+                continue
+            if (
+                "reserves" in sheet_name.casefold()
+                and "Recurs" in frame.columns
+                and "DataUs" in frame.columns
+                and "HoraInici" in frame.columns
+                and "Reserves" not in frame.columns
+            ):
+                frame = frame.copy()
+                frame["Reserves"] = 1
             if not required_columns.issubset(frame.columns):
-                if _is_named_historical_sheet(sheet_name):
+                if (
+                    _is_named_historical_sheet(sheet_name)
+                    and not (
+                        "activitat" in sheet_name.casefold()
+                        or "guided" in sheet_name.casefold()
+                    )
+                ):
                     missing = required_columns - set(frame.columns)
                     raise ValueError(
                         f"Missing required columns in historical sheet "
@@ -303,6 +467,8 @@ def process_workbook(file_path: Path = FILE_PATH) -> dict:
         }
         for source_id, (source_type, label) in source_definitions.items():
             rows = source_rows_by_id.get(source_id, [])
+            if source_id == "saf_guided_activities_2026" and not rows:
+                continue
             period_from, period_to = _current_frame_period(rows)
             register_data_source(
                 connection,
@@ -342,7 +508,41 @@ def process_workbook(file_path: Path = FILE_PATH) -> dict:
 
 def main():
     init_db()
+    if not GUIDED_ACTIVITIES_PATH.exists():
+        raise FileNotFoundError(
+            "No s'ha trobat el dataset privat d'activitats dirigides: "
+            f"{GUIDED_ACTIVITIES_PATH}"
+        )
     summary = process_workbook()
+    guided_checksum = hashlib.sha256(
+        GUIDED_ACTIVITIES_PATH.read_bytes()
+    ).hexdigest()
+    guided_frame = pd.read_csv(GUIDED_ACTIVITIES_PATH)
+    with get_connection() as connection:
+        guided_rows = normalize_guided_activity_rows(
+            guided_frame,
+            source_checksum=guided_checksum,
+            connection=connection,
+        )
+        period_from, period_to = _current_frame_period(guided_rows)
+        register_data_source(
+            connection,
+            source_id="saf_guided_activities_2026",
+            source_type="saf_guided_activities",
+            label="SAF guided activities 2026",
+            period_from=period_from,
+            period_to=period_to,
+            checksum=guided_checksum,
+        )
+        upsert_historical_usage(connection, guided_rows)
+    summary["guided_activity_rows"] = len(guided_rows)
+    summary["guided_activity_mapped_rows"] = sum(
+        row["mapping_status"] == "mapped" for row in guided_rows
+    )
+    summary["guided_activity_manual_review_rows"] = sum(
+        row["mapping_status"] == "manual_review"
+        for row in guided_rows
+    )
     for key, value in summary.items():
         print(f"{key}: {value}")
 

@@ -24,7 +24,7 @@ PADEL_PISTA_2_ID = "pistes-de-padel-pista-2"
 HISTORICAL_DATA_PATH = (
     Path(__file__).resolve().parents[2]
     / "data"
-    / "processed"
+    / "local"
     / "historical_occupancy.csv"
 )
 
@@ -405,6 +405,10 @@ def get_historical_import_quality_report() -> dict:
             JOIN data_sources AS sources
                 ON sources.id = usage.source_id
                 AND sources.checksum = usage.source_checksum
+            WHERE usage.source_id IN (
+                'saf_reserves_2026',
+                'saf_guided_activities_2026'
+            )
             """
         ).fetchall()
         services = connection.execute(
@@ -448,17 +452,55 @@ def get_historical_import_quality_report() -> dict:
                 AND sources.checksum = usage.source_checksum
             WHERE usage.mapping_status = 'mapped'
                 AND usage.space_id IS NOT NULL
+                AND usage.source_id = 'saf_reserves_2026'
             """
         ).fetchall()
+        historical_space_ids_all_sources = connection.execute(
+            """
+            SELECT DISTINCT space_id
+            FROM historical_usage AS usage
+            JOIN data_sources AS sources
+                ON sources.id = usage.source_id
+                AND sources.checksum = usage.source_checksum
+            WHERE usage.source_id IN (
+                'saf_reserves_2026',
+                'saf_guided_activities_2026'
+            )
+                AND usage.space_id IS NOT NULL
+            """
+        ).fetchall()
+        catalog_spaces = connection.execute(
+            "SELECT id FROM spaces ORDER BY id"
+        ).fetchall()
+        guided_source_rows = connection.execute(
+            """
+            SELECT COUNT(*) AS source_rows
+            FROM historical_usage AS usage
+            JOIN data_sources AS sources
+                ON sources.id = usage.source_id
+                AND sources.checksum = usage.source_checksum
+            WHERE usage.source_id = 'saf_guided_activities_2026'
+            """
+        ).fetchone()["source_rows"]
 
-    raw_rows = len(historical_rows)
+    reservation_rows = [
+        row
+        for row in historical_rows
+        if row["raw_reservation_count"] is not None
+    ]
+    guided_rows = [
+        row
+        for row in historical_rows
+        if row["source_id"] == "saf_guided_activities_2026"
+    ]
+    raw_rows = len(reservation_rows)
     raw_volume = sum(
         float(row["raw_reservation_count"])
-        for row in historical_rows
+        for row in reservation_rows
         if row["raw_reservation_count"] is not None
     )
     mapped_rows = [
-        row for row in historical_rows
+        row for row in reservation_rows
         if row["mapping_status"] == "mapped"
     ]
     mapped_volume = sum(
@@ -468,21 +510,46 @@ def get_historical_import_quality_report() -> dict:
     )
     raw_resources = {
         row["raw_resource_name"]
-        for row in historical_rows
+        for row in reservation_rows
         if row["raw_resource_name"]
     }
     resources_by_status = {
         status: {
             row["raw_resource_name"]
-            for row in historical_rows
+            for row in reservation_rows
             if row["mapping_status"] == status
             and row["raw_resource_name"]
         }
         for status in ("mapped", "manual_review", "ignored")
     }
+    reservation_resource_details = {}
+    for row in reservation_rows:
+        raw_name = row["raw_resource_name"]
+        if not raw_name:
+            continue
+        details = reservation_resource_details.setdefault(
+            raw_name,
+            {
+                "raw_rows": 0,
+                "reservation_volume": 0.0,
+                "mapping_status": row["mapping_status"],
+                "service_id": row["service_id"],
+                "space_id": row["space_id"],
+            },
+        )
+        details["raw_rows"] += 1
+        if row["raw_reservation_count"] is not None:
+            details["reservation_volume"] += float(
+                row["raw_reservation_count"]
+            )
     historical_space_ids = {
         row["space_id"]
         for row in mapped_history_spaces
+        if row["space_id"]
+    }
+    all_historical_space_ids = {
+        row["space_id"]
+        for row in historical_space_ids_all_sources
         if row["space_id"]
     }
     links_by_service: dict[str, set[str]] = {}
@@ -498,12 +565,12 @@ def get_historical_import_quality_report() -> dict:
     raw_resources_by_service = {
         service_id: {
             row["raw_resource_name"]
-            for row in mapped_rows
+            for row in guided_rows
             if row["service_id"] == service_id
             and row["raw_resource_name"]
         }
         for service_id in {
-            row["service_id"] for row in mapped_rows if row["service_id"]
+            row["service_id"] for row in guided_rows if row["service_id"]
         }
     }
 
@@ -543,16 +610,21 @@ def get_historical_import_quality_report() -> dict:
     gates = {
         service_id: {
             "mapped_resources": len(links_by_service.get(service_id, set())),
+            "historical_resources": service_summary.get(
+                service_id, {}
+            ).get("historical_resources", 0),
             "minimum_expected": minimum,
-            "passed": len(links_by_service.get(service_id, set())) >= minimum,
+            "passed": (
+                len(links_by_service.get(service_id, set())) >= minimum
+                and service_summary.get(service_id, {}).get(
+                    "historical_resources", 0
+                )
+                >= minimum
+            ),
         }
         for service_id, minimum in expected_minimums.items()
     }
-    known_volume_rows = [
-        row
-        for row in historical_rows
-        if row["raw_reservation_count"] is not None
-    ]
+    known_volume_rows = reservation_rows
     coverage_by_rows = (
         round(len(mapped_rows) / raw_rows * 100, 2)
         if raw_rows
@@ -563,35 +635,91 @@ def get_historical_import_quality_report() -> dict:
         if raw_volume
         else None
     )
-    all_mapped_spaces = {
-        row["space_id"]
-        for row in service_links
-        if row["space_id"] and not row["is_virtual"]
-    }
+    all_mapped_spaces = {row["id"] for row in catalog_spaces}
+    guided_mapping_status_counts = Counter(
+        row["mapping_status"] for row in guided_rows
+    )
+    padel_pista_2_link = next(
+        (
+            row
+            for row in service_links
+            if row["service_id"] == "padel"
+            and row["space_id"] == "pistes-de-padel-pista-2"
+        ),
+        None,
+    )
+    padel_pista_2_rows = [
+        row
+        for row in reservation_rows
+        if row["service_id"] == "padel"
+        and row["space_id"] == "pistes-de-padel-pista-2"
+        and row["mapping_status"] == "mapped"
+    ]
     return {
         "raw_rows": raw_rows,
         "raw_reservation_volume": raw_volume,
         "rows_with_known_reservation_volume": len(known_volume_rows),
         "unique_raw_resources": len(raw_resources),
         "mapped_resources": len(resources_by_status["mapped"]),
+        "mapped_resource_details": {
+            name: reservation_resource_details[name]
+            for name in sorted(resources_by_status["mapped"])
+        },
         "manual_review_resources": sorted(
             resources_by_status["manual_review"]
         ),
         "manual_review_resource_count": len(
             resources_by_status["manual_review"]
         ),
+        "manual_review_resource_details": {
+            name: reservation_resource_details[name]
+            for name in sorted(resources_by_status["manual_review"])
+        },
         "ignored_resources": sorted(resources_by_status["ignored"]),
         "ignored_resource_count": len(resources_by_status["ignored"]),
+        "ignored_resource_details": {
+            name: reservation_resource_details[name]
+            for name in sorted(resources_by_status["ignored"])
+        },
         "mapped_reservation_volume": mapped_volume,
         "coverage_by_rows_percentage": coverage_by_rows,
         "coverage_by_reservation_volume_percentage": coverage_by_volume,
         "spaces_without_historical": sorted(
-            all_mapped_spaces - historical_space_ids
+            all_mapped_spaces - all_historical_space_ids
         ),
         "services_without_spaces": [row["id"] for row in services],
         "spaces_without_service": [
             row["id"] for row in spaces_without_service
         ],
+        "guided_activity_sessions": len(guided_rows),
+        "guided_activity_source_rows": guided_source_rows,
+        "guided_activity_mapping_status_counts": dict(
+            guided_mapping_status_counts
+        ),
+        "guided_activity_manual_review_resources": sorted(
+            {
+                row["raw_resource_name"]
+                for row in guided_rows
+                if row["mapping_status"] == "manual_review"
+                and row["raw_resource_name"]
+            }
+        ),
+        "padel_pista_2": {
+            "space_id": "pistes-de-padel-pista-2",
+            "linked": padel_pista_2_link is not None,
+            "virtual": (
+                bool(padel_pista_2_link["is_virtual"])
+                if padel_pista_2_link is not None
+                else None
+            ),
+            "historical_rows": len(padel_pista_2_rows),
+            "reservation_volume": sum(
+                float(row["raw_reservation_count"])
+                for row in padel_pista_2_rows
+                if row["raw_reservation_count"] is not None
+            ),
+            "recovered": bool(padel_pista_2_rows),
+        },
         "service_summary": service_summary,
         "resource_gates": gates,
     }
