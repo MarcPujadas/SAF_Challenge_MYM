@@ -1,32 +1,9 @@
-# React + TypeScript + Vite
+# Portal web SAFi
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Portal de reserves i estadistiques per al SAF, integrat amb FastAPI (mateix backend que Expo). Amb **Windows** fes doble clic a `../iniciar_web.bat`; instal-la les dependències automaticament i obre `http://127.0.0.1:5173`.
 
-Currently, two official plugins are available:
+Manual: `npm ci`, `npm run dev`; per compilar: `npm run build`. El backend ha d'estar actiu a `http://127.0.0.1:8000`. Per canviar-lo, crea `web/.env` amb `VITE_API_URL=http://IP:8000`.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+El client `src/services/api.ts` desempaqueta el format `{success,data,error}` del backend; reserva amb `service_id` i camps `start/end`.
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
-```
-
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Documentacio: `../docs/05_web_dashboard.md`. Recorda que el panell no te autenticacio/autoritzacio real; no exposar-lo publicament.
