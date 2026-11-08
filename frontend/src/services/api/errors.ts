@@ -18,6 +18,12 @@ export function errorMessage(err: unknown): string {
         return 'El rang de dates no és vàlid.';
       case 'OCCUPANCY_DATA_UNAVAILABLE':
         return 'No tenim prou dades històriques d’aquesta franja per fer una previsió fiable.';
+      case 'INVALID_SERVICE':
+        return 'Aquest servei no existeix o no es pot reservar.';
+      case 'INVALID_SERVICE_CONFIGURATION':
+        return 'Aquest servei no està ben configurat. Torna-ho a provar més tard.';
+      case 'INVALID_USER':
+        return 'Aquest usuari no és vàlid.';
       case 'RESERVATION_NOT_FOUND':
         return 'Aquesta reserva no existeix.';
       case 'RESERVATION_ALREADY_CANCELLED':

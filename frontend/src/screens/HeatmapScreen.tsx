@@ -2,11 +2,11 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import HeatmapGrid, { availabilityCell, forecastCell } from '../components/HeatmapGrid';
+import HeatmapGrid, { forecastCell, serviceSlotCell } from '../components/HeatmapGrid';
 import type { CellValue, HeatmapMode } from '../components/HeatmapGrid';
 import type { RootStackParamList } from '../navigation/types';
-import { errorMessage, getAvailabilityWeek, getHeatmap, getServices } from '../services/api';
-import type { AvailabilityWeek, Heatmap, Service } from '../services/api';
+import { errorMessage, getHeatmap, getServiceAvailabilityWeek, getServices } from '../services/api';
+import type { Heatmap, Service, ServiceAvailabilityWeek } from '../services/api';
 import { addDays, daysFrom, formatRange, mondayOf, todayDate, weekdayShort } from '../utils/dates';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Heatmap'>;
@@ -20,7 +20,7 @@ export default function HeatmapScreen({ navigation, route }: Props) {
   const [mode, setMode] = useState<HeatmapMode>('availability');
   const [weekStart, setWeekStart] = useState(() => mondayOf(todayDate()));
 
-  const [week, setWeek] = useState<AvailabilityWeek | null>(null);
+  const [week, setWeek] = useState<ServiceAvailabilityWeek | null>(null);
   const [forecast, setForecast] = useState<Heatmap | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,11 +68,11 @@ export default function HeatmapScreen({ navigation, route }: Props) {
     setLoading(true);
     try {
       if (effectiveMode === 'availability') {
-        const result = await getAvailabilityWeek(service.space_id, weekStart, weekEnd);
+        const result = await getServiceAvailabilityWeek(service.id, weekStart, weekEnd);
         if (id !== dataReq.current) return;
         setWeek(result);
       } else {
-        const result = await getHeatmap(service.space_id, weekStart, weekEnd);
+        const result = await getHeatmap(service.id, weekStart, weekEnd);
         if (id !== dataReq.current) return;
         setForecast(result);
       }
@@ -88,15 +88,18 @@ export default function HeatmapScreen({ navigation, route }: Props) {
   }, [loadData]);
 
   // Files i cel·les: tot ve del backend; si un dia no hi es, la cel·la mostra "—".
-  const { rows, getCell, hasData } = useMemo(() => {
+  const { rows, getCell, hasData, isFull, notValidated } = useMemo(() => {
     const set = new Set<string>();
     const cells = new Map<string, CellValue>();
+    const full = new Set<string>();
     let anyKnown = false;
+    let notValidated = false;
     if (effectiveMode === 'availability' && week) {
       for (const day of week.days) {
         for (const s of day.slots) {
           set.add(s.start);
-          cells.set(`${day.date}|${s.start}`, availabilityCell(s));
+          cells.set(`${day.date}|${s.start}`, serviceSlotCell(s));
+          if (!s.available) full.add(`${day.date}|${s.start}`);
           anyKnown = true;
         }
       }
@@ -105,7 +108,9 @@ export default function HeatmapScreen({ navigation, route }: Props) {
         for (const s of day.slots) {
           set.add(s.hour);
           cells.set(`${day.date}|${s.hour}`, forecastCell(s));
-          if (s.occupancy_level !== 'unknown') anyKnown = true;
+          // Previsio valida nomes si el backend dona score i nivell coneguts.
+          if (s.occupancy_score != null && s.occupancy_level !== 'unknown') anyKnown = true;
+          if (s.unavailable_reason === 'aggregated_forecast_not_validated') notValidated = true;
         }
       }
     }
@@ -113,6 +118,8 @@ export default function HeatmapScreen({ navigation, route }: Props) {
       rows: Array.from(set).sort(),
       getCell: (date: string, row: string) => cells.get(`${date}|${row}`) ?? null,
       hasData: anyKnown,
+      isFull: (date: string, row: string) => full.has(`${date}|${row}`),
+      notValidated,
     };
   }, [effectiveMode, week, forecast]);
 
@@ -200,8 +207,17 @@ export default function HeatmapScreen({ navigation, route }: Props) {
           {!loading && !error && loaded && !hasData && (
             <Text style={styles.muted}>
               {effectiveMode === 'forecast'
-                ? 'Sense dades de previsió'
+                ? notValidated
+                  ? 'Sense dades de previsió: encara no hi ha previsió validada per a aquest servei.'
+                  : 'Sense dades de previsió'
                 : 'No hi ha franges per a aquesta setmana'}
+            </Text>
+          )}
+          {!loading && !error && loaded && hasData && effectiveMode === 'availability' && week && (
+            <Text style={styles.muted}>
+              {week.capacity_mode === 'people'
+                ? 'Cada cel·la mostra les places disponibles del servei.'
+                : 'Cada cel·la mostra les unitats lliures sobre el total (p. ex. 3/5).'}
             </Text>
           )}
           {!loading && !error && loaded && hasData && (
@@ -211,7 +227,7 @@ export default function HeatmapScreen({ navigation, route }: Props) {
               getCell={getCell}
               mode={effectiveMode}
               onCellPress={canBook ? pickCell : undefined}
-              isDisabled={(date) => date < today}
+              isDisabled={(date, row) => date < today || isFull(date, row)}
             />
           )}
         </>

@@ -16,10 +16,10 @@ import type { RootStackParamList } from '../navigation/types';
 import { chatSafi, errorMessage } from '../services/api';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'SafiChat'>;
-type ChatMessage = { id: number; from: 'user' | 'safi'; text: string };
+type ChatMessage = { id: number; from: 'user' | 'safi'; text: string; noAnswer?: boolean };
 
 const SUGGESTIONS = [
-  'Quan hi ha menys gent al fitness?',
+  'Quan hi ha menys gent a la piscina de 25 m?',
   'Quina hora em recomanes demà?',
   'Tinc alguna reserva?',
 ];
@@ -51,7 +51,8 @@ export default function SafiChatScreen(_props: Props) {
       const res = await chatSafi(text);
       setMessages((prev) => [
         ...prev,
-        { id: nextId.current++, from: 'safi', text: plainText(res.message) },
+        // Resposta del backend tal qual; can_answer=false s'indica clarament.
+        { id: nextId.current++, from: 'safi', text: plainText(res.message), noAnswer: !res.can_answer },
       ]);
     } catch (err) {
       setError(errorMessage(err));
@@ -91,6 +92,9 @@ export default function SafiChatScreen(_props: Props) {
           >
             {message.from === 'safi' && <Text style={styles.safiTitle}>SAFi</Text>}
             <Text style={styles.text}>{message.text}</Text>
+            {message.noAnswer && (
+              <Text style={styles.noAnswer}>SAFi no té prou dades per respondre amb seguretat.</Text>
+            )}
           </View>
         ))}
 
@@ -137,6 +141,7 @@ const styles = StyleSheet.create({
   bubble: { padding: 12, borderRadius: 12, marginBottom: 8, maxWidth: '85%' },
   user: { alignSelf: 'flex-end', backgroundColor: '#e3f0ff' },
   safi: { alignSelf: 'flex-start', backgroundColor: '#f3e8ff', borderWidth: 1, borderColor: '#9c27b0' },
+  noAnswer: { marginTop: 6, fontSize: 13, color: '#8a5a00', fontWeight: '600' },
   safiTitle: { fontWeight: 'bold', color: '#6a1b9a', marginBottom: 4 },
   text: { fontSize: 16 },
   loadingRow: { flexDirection: 'row', alignItems: 'center' },

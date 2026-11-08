@@ -55,6 +55,11 @@ export default function ServeisScreen({ navigation }: Props) {
           <Text style={s.reservable ? styles.reservable : styles.notReservable}>
             {s.reservable ? 'Reservable' : 'No reservable'}
           </Text>
+          {s.resource_count != null && (
+            <Text style={styles.meta}>
+              {s.resource_count === 1 ? '1 recurs' : `${s.resource_count} recursos`}
+            </Text>
+          )}
           <View style={styles.row}>
             <Pressable
               style={[styles.secondary, styles.flex]}
@@ -86,6 +91,7 @@ const styles = StyleSheet.create({
   card: { padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#ccc', marginBottom: 12 },
   name: { fontSize: 18, fontWeight: 'bold' },
   description: { fontSize: 15, color: '#444', marginTop: 4 },
+  meta: { marginTop: 4, fontSize: 14, color: '#444' },
   reservable: { marginTop: 6, color: '#2e7d32', fontWeight: 'bold' },
   notReservable: { marginTop: 6, color: '#666', fontWeight: 'bold' },
   row: { flexDirection: 'row', gap: 8, marginTop: 10 },

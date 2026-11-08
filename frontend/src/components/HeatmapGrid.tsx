@@ -1,6 +1,6 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import type { OccupancyLevel } from '../services/api';
+import type { OccupancyLevel, ServiceWeekSlot } from '../services/api';
 import { parseDate, weekdayShort } from '../utils/dates';
 
 // Presentacio pura: no calcula ocupacio ni disponibilitat, nomes pinta el que rep.
@@ -44,17 +44,17 @@ export function forecastCell(slot: {
   };
 }
 
-// available=true verd, false vermell. Capacitat desconeguda: no s'inventa.
-export function availabilityCell(slot: {
-  available: boolean;
-  remaining_capacity: number | null;
-}): CellValue {
+// Cel·la de disponibilitat agregada d'un servei (GET /services/{id}/availability/week).
+// unit: "3/5" (unitats lliures / totals) · people: "47 pl." (places restants). Tot ve del backend.
+export function serviceSlotCell(slot: ServiceWeekSlot): CellValue {
   if (!slot.available) return { tone: 'bad', text: 'Plena' };
-  return {
-    tone: 'good',
-    text: 'Lliure',
-    sub: slot.remaining_capacity != null ? `${slot.remaining_capacity} pl.` : undefined,
-  };
+  let sub: string | undefined;
+  if (slot.capacity_mode === 'people') {
+    if (slot.remaining_people_capacity != null) sub = `${slot.remaining_people_capacity} pl.`;
+  } else if (slot.available_units != null && slot.total_units != null) {
+    sub = `${slot.available_units}/${slot.total_units}`;
+  }
+  return { tone: 'good', text: 'Lliure', sub };
 }
 
 type Props = {

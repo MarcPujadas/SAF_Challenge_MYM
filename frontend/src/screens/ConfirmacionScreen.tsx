@@ -6,7 +6,7 @@ import type { RootStackParamList } from '../navigation/types';
 type Props = NativeStackScreenProps<RootStackParamList, 'Confirmacion'>;
 
 export default function ConfirmacionScreen({ navigation, route }: Props) {
-  const { reservation, spaceName } = route.params;
+  const { reservation, serviceName } = route.params;
 
   return (
     <View style={styles.container}>
@@ -15,9 +15,11 @@ export default function ConfirmacionScreen({ navigation, route }: Props) {
       <Text style={styles.subtitle}>La reserva s'ha guardat correctament.</Text>
 
       <View style={styles.card}>
-        <Row label="Espai" value={spaceName} />
+        <Row label="Servei" value={serviceName} />
+        <Row label="Recurs assignat" value={reservation.space_name || reservation.space_id} />
         <Row label="Data" value={reservation.date} />
         <Row label="Hora" value={`${reservation.start}-${reservation.end}`} />
+        <Row label="Estat" value={reservation.status === 'confirmed' ? 'Confirmada' : 'Cancel·lada'} />
         <Row label="ID" value={reservation.reservation_id} />
       </View>
 
