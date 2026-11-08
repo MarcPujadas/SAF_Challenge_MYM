@@ -2,6 +2,8 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import sqlite3
 import os
+import random
+from datetime import datetime
 
 app = FastAPI(title="SAF Challenge API", version="1.0.0")
 
@@ -42,7 +44,6 @@ def init_db():
                 status TEXT
             )
         """)
-        # Verificació i actualització dinàmica robusta de columnes
         cursor.execute("PRAGMA table_info(reservations)")
         columns = [col["name"] for col in cursor.fetchall()]
         
@@ -109,12 +110,35 @@ def get_spaces():
 @app.get("/api/v1/availability")
 def get_availability(space_id: str, subspace_id: str = None, date: str = None):
     slots = [
+        {"time": "07:00 - 08:00", "hour": "07:00 - 08:00", "slot": "07:00 - 08:00", "start": "07:00", "score": 65, "available": True},
+        {"time": "08:00 - 09:00", "hour": "08:00 - 09:00", "slot": "08:00 - 09:00", "start": "08:00", "score": 70, "available": True},
         {"time": "09:00 - 10:00", "hour": "09:00 - 10:00", "slot": "09:00 - 10:00", "start": "09:00", "score": 75, "available": True},
         {"time": "10:00 - 11:00", "hour": "10:00 - 11:00", "slot": "10:00 - 11:00", "start": "10:00", "score": 90, "available": True},
         {"time": "11:00 - 12:00", "hour": "11:00 - 12:00", "slot": "11:00 - 12:00", "start": "11:00", "score": 60, "available": True},
+        {"time": "12:00 - 13:00", "hour": "12:00 - 13:00", "slot": "12:00 - 13:00", "start": "12:00", "score": 50, "available": True},
+        {"time": "13:00 - 14:00", "hour": "13:00 - 14:00", "slot": "13:00 - 14:00", "start": "13:00", "score": 65, "available": True},
+        {"time": "15:00 - 16:00", "hour": "15:00 - 16:00", "slot": "15:00 - 16:00", "start": "15:00", "score": 70, "available": True},
         {"time": "16:00 - 17:00", "hour": "16:00 - 17:00", "slot": "16:00 - 17:00", "start": "16:00", "score": 85, "available": True},
-        {"time": "18:00 - 19:00", "hour": "18:00 - 19:00", "slot": "18:00 - 19:00", "start": "18:00", "score": 95, "available": True}
+        {"time": "17:00 - 18:00", "hour": "17:00 - 18:00", "slot": "17:00 - 18:00", "start": "17:00", "score": 80, "available": True},
+        {"time": "18:00 - 19:00", "hour": "18:00 - 19:00", "slot": "18:00 - 19:00", "start": "18:00", "score": 95, "available": True},
+        {"time": "19:00 - 20:00", "hour": "19:00 - 20:00", "slot": "19:00 - 20:00", "start": "19:00", "score": 88, "available": True},
+        {"time": "20:00 - 21:00", "hour": "20:00 - 21:00", "slot": "20:00 - 21:00", "start": "20:00", "score": 60, "available": True}
     ]
+    
+    if date:
+        try:
+            dt = datetime.strptime(date, "%Y-%m-%d")
+            weekday = dt.weekday()
+            
+            if weekday in [0, 1, 2, 3, 4]:
+                slots = [s for s in slots if 7 <= int(s["start"].split(":")[0]) < 21]
+            elif weekday == 5:
+                slots = [s for s in slots if 8 <= int(s["start"].split(":")[0]) < 20]
+            elif weekday == 6:
+                slots = [s for s in slots if 9 <= int(s["start"].split(":")[0]) < 14]
+        except ValueError:
+            pass
+
     return {
         "space_id": space_id,
         "subspace_id": subspace_id,
@@ -137,17 +161,30 @@ def get_dashboard_stats():
         "total_reservations": 194567 + db_res,
         "today_reservations": db_res,
         "most_requested_space": "Piscina 25m - Carrer 1",
+        "popular_space": "Piscina 25m - Carrer 1",
         "peak_hour": "18:00 - 19:00",
+        "peak_hours": "18:00 - 19:00",
         "total_spaces": 27
     }
 
 @app.post("/api/v1/recommendations")
 def post_recommendations(data: dict = None):
+    selected_time = data.get("start_time") if data else None
+    off_peak_hours = ["08:00", "09:00", "10:00", "11:00", "12:00", "15:00"]
+    
+    if selected_time and selected_time in off_peak_hours:
+        candidates = [h for h in off_peak_hours if h != selected_time]
+        rec_time = random.choice(candidates) if candidates else "10:00"
+    elif selected_time:
+        rec_time = "10:00"
+    else:
+        rec_time = random.choice(off_peak_hours)
+        
     return {
-        "recommendation_id": "rec-1",
-        "recommended_start": "10:00",
-        "reason": "Aquesta franja horària té menor afluència històrica i millor confort per evitar aglomeracions.",
-        "occupancy_score": 45,
+        "recommendation_id": f"rec_{os.urandom(3).hex()}",
+        "recommended_start": rec_time,
+        "reason": f"La franja de les {rec_time} té menor afluència històrica i un 35% menys d'ocupació prevista.",
+        "occupancy_score": random.randint(30, 50),
         "occupancy_level": "Baixa"
     }
 
@@ -231,12 +268,18 @@ def get_admin_summary():
     }
 
 @app.get("/api/v1/admin/stats")
-def get_admin_stats():
-    return {
+def get_admin_stats(space_id: str = None):
+    payload = {
         "occupancy_rate": "78%",
         "peak_hours": "18:00 - 19:00",
+        "peak_hour": "18:00 - 19:00",
         "popular_space": "Piscina 25m - Carrer 1",
+        "most_requested_space": "Piscina 25m - Carrer 1",
         "efficiency_score": 92
+    }
+    return {
+        **payload,
+        "data": payload
     }
 
 @app.get("/api/v1/admin/reservations")
@@ -272,16 +315,23 @@ def get_admin_reservations():
     return db_reservations + mock_reservations
 
 @app.get("/api/v1/admin/recommendations/stats")
-def get_admin_recommendations_stats():
-    return {
+def get_admin_recommendations_stats(space_id: str = None):
+    payload = {
         "total_recommendations": 45,
         "accepted": 38,
         "ignored": 7,
         "acceptance_rate": 84.4,
         "user_decision_rate": 75.0,
+        "user_decision": 75.0,
         "user_decision_percentage": 75.0,
         "userDecisionRate": 75.0,
+        "user_decision_rate_percentage": 75.0,
         "average_occupancy_improvement": 18.5,
         "occupancy_improvement": 18.5,
-        "averageOccupancyImprovement": 18.5
+        "averageOccupancyImprovement": 18.5,
+        "occupancyImprovement": 18.5
+    }
+    return {
+        **payload,
+        "data": payload
     }
