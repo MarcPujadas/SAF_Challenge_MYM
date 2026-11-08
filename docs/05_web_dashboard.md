@@ -26,3 +26,8 @@ Les metriques de reserves son operatives, mentre que tendències i ocupacio hist
 ## Límits
 
 Panell de prova sense control d'accés; no desplegar en public sense autenticacio/autoritzacio. Les dades de demo poden ser sintetiques i s'han d'etiquetar com a tals. Si el backend no respon, revisar `/health`, errors del navegador i configuracio `VITE_API_URL`.
+
+
+## Versió de la Hajar integrada
+
+La branca `hajar/web-dashboard` (commit `c4ecaf3`) publica un dashboard bàsic com a punt d'entrada. La vista **Dashboard SAF** utilitza aquesta implementació, adaptant-la als noms de camp i a l'envolupant de l'API actual i mostrant els errors de connexió de manera real. Les funcionalitats avançades que ja existien a `main` es conserven a **SAFi Insights**; la reserva web continua separada. Aquesta integració evita incorporar fitxers d'entorns virtuals o un backend antic.
