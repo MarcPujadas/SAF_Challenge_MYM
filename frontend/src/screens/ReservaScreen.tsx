@@ -1,9 +1,10 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import HeatmapGrid, { forecastCell, serviceSlotCell } from '../components/HeatmapGrid';
 import type { CellValue, HeatmapMode } from '../components/HeatmapGrid';
+import { Button, Card, Chip, EmptyState, ErrorState, LoadingState, ScreenContainer } from '../components/ui';
 import type { RootStackParamList } from '../navigation/types';
 import {
   ApiError,
@@ -23,6 +24,7 @@ import type {
   ServiceAvailabilityWeek,
   ServiceWeekSlot,
 } from '../services/api';
+import { colors, radius, spacing, typography } from '../theme/theme';
 import { capacityText } from '../utils/capacity';
 import { addDays, todayDate, weekdayLong } from '../utils/dates';
 
@@ -363,20 +365,22 @@ export default function ReservaScreen({ navigation, route }: Props) {
     adviceFailed;
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScreenContainer>
       {/* 1. Servei */}
       <Text style={styles.step}>1. Servei</Text>
-      {servicesLoading && <ActivityIndicator />}
-      {servicesError && <ErrorBox text={servicesError} onRetry={loadServices} />}
-      {(service ? [service] : services)?.map((s) => (
-        <Option
-          key={s.id}
-          label={s.name}
-          selected={service?.id === s.id}
-          disabled={submitting}
-          onPress={() => pickService(s)}
-        />
-      ))}
+      {servicesLoading && <LoadingState lines={2} />}
+      {servicesError && <ErrorState message={servicesError} onRetry={loadServices} />}
+      <View style={styles.chips}>
+        {(service ? [service] : services)?.map((s) => (
+          <Chip
+            key={s.id}
+            label={s.name}
+            selected={service?.id === s.id}
+            disabled={submitting}
+            onPress={() => pickService(s)}
+          />
+        ))}
+      </View>
       {service && (
         <Text style={styles.muted}>
           Toca de nou el servei seleccionat per canviar d'esport.
@@ -386,48 +390,58 @@ export default function ReservaScreen({ navigation, route }: Props) {
       {/* 2. Mini heatmap */}
       {service && (
         <>
-          <Text style={styles.step}>2. Disponibilitat i previsió</Text>
-          <View style={styles.modeRow}>
-            <Option
+          <Text style={styles.step}>2. Dia i hora</Text>
+          <View style={styles.chips}>
+            <Chip
               label="Disponibilitat"
               selected={miniMode === 'availability'}
               disabled={submitting}
               onPress={() => setMiniMode('availability')}
             />
-            <Option
+            <Chip
               label="Previsió SAFi"
               selected={miniMode === 'forecast'}
               disabled={submitting}
               onPress={() => setMiniMode('forecast')}
             />
           </View>
-          <Text style={styles.muted}>
-            {miniMode === 'availability'
-              ? 'Disponibilitat: reserves actuals. Toca una cel·la per triar-la.'
-              : 'Previsió SAFi: estimació històrica, no és ocupació en temps real.'}
-          </Text>
-          {miniLoading && <ActivityIndicator />}
-          {miniError && <ErrorBox text={miniError} onRetry={() => loadMini(service)} />}
-          {!miniLoading && !miniError && mini.loaded && !mini.hasData && (
-            <Text style={styles.muted}>
-              {miniMode === 'forecast'
-                ? forecastFailed
-                  ? "No s'ha pogut carregar la previsió"
-                  : 'Sense dades de previsió'
-                : 'No hi ha franges per a aquests dies'}
+          <View style={[styles.zone, miniMode === 'forecast' && styles.zoneForecast]}>
+            <Text style={[styles.zoneTitle, miniMode === 'forecast' && styles.zoneTitleForecast]}>
+              {miniMode === 'availability' ? 'Disponibilitat actual' : 'Previsió SAFi'}
             </Text>
+            <Text style={styles.zoneText}>
+              {miniMode === 'availability'
+                ? 'Disponibilitat: reserves actuals. Toca una cel·la per triar-la.'
+                : 'Previsió SAFi: estimació històrica, no és ocupació en temps real.'}
+            </Text>
+          </View>
+          {miniLoading && <LoadingState lines={4} />}
+          {miniError && <ErrorState message={miniError} onRetry={() => loadMini(service)} />}
+          {!miniLoading && !miniError && mini.loaded && !mini.hasData && (
+            <EmptyState
+              icon={miniMode === 'forecast' ? '📉' : '🗓️'}
+              title={
+                miniMode === 'forecast'
+                  ? forecastFailed
+                    ? "No s'ha pogut carregar la previsió"
+                    : 'Sense dades de previsió'
+                  : 'No hi ha franges per a aquests dies'
+              }
+            />
           )}
           {!miniLoading && !miniError && mini.loaded && mini.hasData && (
-            <HeatmapGrid
-              compact
-              dates={dayDates}
-              rows={mini.rows}
-              getCell={mini.getCell}
-              mode={miniMode}
-              onCellPress={pickCell}
-              isDisabled={mini.isFull}
-              selected={date && slot ? { date, row: slot.start } : null}
-            />
+            <Card style={styles.gridCard}>
+              <HeatmapGrid
+                compact
+                dates={dayDates}
+                rows={mini.rows}
+                getCell={mini.getCell}
+                mode={miniMode}
+                onCellPress={pickCell}
+                isDisabled={mini.isFull}
+                selected={date && slot ? { date, row: slot.start } : null}
+              />
+            </Card>
           )}
 
           <Text style={styles.muted}>
@@ -437,7 +451,7 @@ export default function ReservaScreen({ navigation, route }: Props) {
       )}
 
       {date && slot && (
-        <View style={styles.selectionBox}>
+        <View style={styles.selectionBox} accessibilityLiveRegion="polite">
           <Text style={styles.selectionLabel}>Reserva seleccionada</Text>
           <Text style={styles.selectionMain}>
             {service?.name} · {weekdayLong(date)} {date} · {slot.start}-{slot.end}
@@ -450,11 +464,11 @@ export default function ReservaScreen({ navigation, route }: Props) {
         <View style={styles.infoRow}>
           <View style={styles.infoBox}>
             <Text style={styles.infoTitle}>Disponibilitat actual</Text>
-            <Text style={styles.infoMain}>{slot.available ? 'Disponible' : 'No disponible'}</Text>
+            <Text style={styles.infoMain}>{slot.available ? 'Disponible' : 'Plena'}</Text>
             <Text style={styles.infoSub}>{capacityText(service.id, slot)}</Text>
           </View>
-          <View style={styles.infoBox}>
-            <Text style={styles.infoTitle}>Previsió SAFi</Text>
+          <View style={[styles.infoBox, styles.infoBoxForecast]}>
+            <Text style={[styles.infoTitle, styles.infoTitleForecast]}>Previsió SAFi</Text>
             {forecastValid && slotForecast ? (
               <>
                 <Text style={styles.infoMain}>Ocupació {LEVEL_LABEL[slotForecast.occupancy_level]}</Text>
@@ -473,7 +487,7 @@ export default function ReservaScreen({ navigation, route }: Props) {
       {slot && (
         <>
           {hasSafi && <Text style={styles.step}>3. SAFi</Text>}
-          {adviceLoading && <ActivityIndicator />}
+          {adviceLoading && <LoadingState lines={2} />}
           {advice && !adviceDismissed && (
             <View style={styles.safiBox}>
               <Pressable
@@ -487,9 +501,10 @@ export default function ReservaScreen({ navigation, route }: Props) {
               <Text style={styles.safiTitle}>SAFi</Text>
               <Text style={styles.safiText}>{advice.message}</Text>
               {altSlot && (
-                <Pressable
-                  style={styles.altButton}
+                <Button
+                  label={`Canviar a ${altSlot.start}`}
                   disabled={submitting}
+                  style={styles.altButton}
                   onPress={() => {
                     sendRecommendationAction(advice, 'accepted');
                     setSlot(altSlot);
@@ -497,9 +512,7 @@ export default function ReservaScreen({ navigation, route }: Props) {
                     setAdviceNoData(null);
                     setAdviceFailed(false);
                   }}
-                >
-                  <Text style={styles.altButtonText}>Canviar a {altSlot.start}</Text>
-                </Pressable>
+                />
               )}
             </View>
           )}
@@ -522,72 +535,78 @@ export default function ReservaScreen({ navigation, route }: Props) {
           )}
 
           <Text style={styles.step}>{hasSafi ? '4. Confirmar' : '3. Confirmar'}</Text>
-          {submitError && <Text style={styles.error}>{submitError}</Text>}
-          <Pressable
-            style={[styles.confirmButton, submitting && styles.disabled]}
+          {submitError && (
+            <View style={styles.errorBox} accessibilityRole="alert">
+              <Text style={styles.error}>{submitError}</Text>
+            </View>
+          )}
+          <Button
+            label={submitting ? 'Reservant...' : `Confirmar ${slot.start}`}
             disabled={submitting}
             onPress={() => void confirm()}
-          >
-            <Text style={styles.confirmText}>
-              {submitting ? 'Reservant...' : `Confirmar ${slot.start}`}
-            </Text>
-          </Pressable>
+            style={styles.confirm}
+          />
         </>
       )}
-    </ScrollView>
-  );
-}
-
-function Option(props: { label: string; selected: boolean; disabled: boolean; onPress: () => void }) {
-  return (
-    <Pressable
-      style={[styles.option, props.selected && styles.optionSelected, props.disabled && styles.disabled]}
-      disabled={props.disabled}
-      onPress={props.onPress}
-    >
-      <Text style={styles.optionText}>{props.label}</Text>
-    </Pressable>
-  );
-}
-
-function ErrorBox({ text, onRetry }: { text: string; onRetry: () => void }) {
-  return (
-    <View>
-      <Text style={styles.error}>{text}</Text>
-      <Pressable style={styles.retryButton} onPress={onRetry}>
-        <Text style={styles.retryText}>Tornar-ho a provar</Text>
-      </Pressable>
-    </View>
+    </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 16, paddingBottom: 48 },
-  step: { fontSize: 18, fontWeight: 'bold', marginTop: 20, marginBottom: 8 },
-  muted: { color: '#666', marginVertical: 8 },
-  error: { color: '#b00020', marginVertical: 8 },
-  option: { padding: 14, borderRadius: 10, borderWidth: 1, borderColor: '#ccc', marginBottom: 8 },
-  optionSelected: { borderColor: '#1565c0', backgroundColor: '#e3f0ff' },
-  optionText: { fontSize: 16 },
-  disabled: { opacity: 0.4 },
-  retryButton: { padding: 12, borderRadius: 10, backgroundColor: '#eee', alignItems: 'center' },
-  retryText: { fontSize: 16 },
-  safiBox: { padding: 14, borderRadius: 12, backgroundColor: '#f3e8ff', borderWidth: 1, borderColor: '#9c27b0' },
-  dismiss: { position: 'absolute', top: 8, right: 10, zIndex: 1 },
-  dismissText: { fontSize: 18, color: '#6a1b9a' },
-  modeRow: { flexDirection: 'row', gap: 8 },
-  selectionBox: { marginTop: 16, padding: 12, borderRadius: 10, backgroundColor: '#e3f0ff' },
-  selectionLabel: { fontSize: 12, color: '#555' },
-  selectionMain: { marginTop: 3, fontSize: 16, fontWeight: 'bold' },
-  infoRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
-  infoBox: { flex: 1, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#ccc' },
-  infoTitle: { fontSize: 12, color: '#666', marginBottom: 4 },
-  infoMain: { fontSize: 15, fontWeight: 'bold' },
-  infoSub: { fontSize: 14, color: '#444', marginTop: 2 },
-  safiTitle: { fontWeight: 'bold', color: '#6a1b9a', marginBottom: 4 },
-  safiText: { fontSize: 16 },
-  altButton: { marginTop: 12, padding: 12, borderRadius: 10, backgroundColor: '#9c27b0', alignItems: 'center' },
-  altButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  confirmButton: { padding: 18, borderRadius: 12, backgroundColor: '#1565c0', alignItems: 'center' },
-  confirmText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  step: { ...typography.heading, marginTop: spacing.xl, marginBottom: spacing.sm },
+  muted: { ...typography.caption, marginVertical: spacing.sm },
+  error: { color: colors.danger, fontWeight: '600' },
+  errorBox: { backgroundColor: colors.dangerSoft, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  zone: {
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.primarySoft,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.primary,
+  },
+  zoneForecast: { backgroundColor: colors.safiSoft, borderLeftColor: colors.safi },
+  zoneTitle: { fontSize: 15, fontWeight: '800', color: colors.primaryDark },
+  zoneTitleForecast: { color: colors.safi },
+  zoneText: { ...typography.caption, marginTop: 2 },
+  gridCard: { padding: spacing.md },
+  safiBox: {
+    padding: spacing.lg,
+    borderRadius: radius.lg,
+    backgroundColor: colors.safiSoft,
+    borderWidth: 1,
+    borderColor: colors.safi,
+  },
+  dismiss: { position: 'absolute', top: 0, right: 0, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', zIndex: 1 },
+  dismissText: { fontSize: 18, color: colors.safi },
+  selectionBox: {
+    marginTop: spacing.lg,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.primarySoft,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  selectionLabel: { ...typography.caption },
+  selectionMain: { marginTop: 3, fontSize: 16, fontWeight: '800', color: colors.primaryDark },
+  infoRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  infoBox: {
+    flex: 1,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  infoBoxForecast: { backgroundColor: colors.safiSoft, borderColor: colors.safiSoft },
+  infoTitle: { ...typography.caption, fontSize: 12, marginBottom: spacing.xs },
+  infoTitleForecast: { color: colors.safi, fontWeight: '700' },
+  infoMain: { fontSize: 15, fontWeight: '700', color: colors.text },
+  infoSub: { fontSize: 14, color: colors.textMuted, marginTop: 2 },
+  safiTitle: { fontWeight: '800', color: colors.safi, marginBottom: spacing.xs },
+  safiText: { fontSize: 16, color: colors.text, paddingRight: spacing.xl },
+  altButton: { marginTop: spacing.md },
+  confirm: { minHeight: 56 },
 });

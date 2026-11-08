@@ -1,11 +1,13 @@
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { Button, Card, LoadingState, ScreenContainer } from '../components/ui';
 import type { RootStackParamList } from '../navigation/types';
 import { getReservations } from '../services/api';
 import type { ReservationItem } from '../services/api';
+import { colors, radius, shadow, spacing, typography } from '../theme/theme';
 import { todayDate } from '../utils/dates';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
@@ -39,74 +41,109 @@ export default function HomeScreen({ navigation }: Props) {
   );
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>SAFi</Text>
+    <ScreenContainer>
+      <Text style={styles.brand}>SAFi</Text>
       <Text style={styles.subtitle}>Reserva millor i evita les hores més plenes.</Text>
 
-      <View style={styles.nextCard}>
-        <Text style={styles.cardLabel}>Pròxima reserva</Text>
+      <Card style={styles.nextCard}>
+        <Text style={typography.caption}>Pròxima reserva</Text>
         {loading ? (
-          <ActivityIndicator />
+          <LoadingState lines={2} />
         ) : nextReservation ? (
           <>
             <Text style={styles.cardTitle}>{nextReservation.space_name}</Text>
             <Text style={styles.cardText}>
               {nextReservation.date} · {nextReservation.start}-{nextReservation.end}
             </Text>
-            <Pressable onPress={() => navigation.navigate('MevesReserves')}>
+            <Pressable
+              onPress={() => navigation.navigate('MevesReserves')}
+              style={({ pressed }) => [styles.linkBox, pressed && styles.pressed]}
+            >
               <Text style={styles.link}>Veure totes les reserves</Text>
             </Pressable>
           </>
         ) : (
           <Text style={styles.cardText}>No tens cap reserva pròxima.</Text>
         )}
-      </View>
+      </Card>
 
-      <Pressable style={styles.button} onPress={() => navigation.navigate('Reserva')}>
-        <Text style={styles.buttonText}>RESERVAR</Text>
+      <Button label="RESERVAR" onPress={() => navigation.navigate('Reserva')} style={styles.reserve} />
+
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => navigation.navigate('Heatmap')}
+        style={({ pressed }) => [styles.safiCard, pressed && styles.pressed]}
+      >
+        <Text style={styles.safiIcon}>✨</Text>
+        <View style={styles.flex}>
+          <Text style={styles.safiTitle}>Quan és millor anar?</Text>
+          <Text style={styles.safiText}>Compara disponibilitat i previsió SAFi.</Text>
+        </View>
       </Pressable>
 
-      <Pressable style={styles.safiButton} onPress={() => navigation.navigate('Heatmap')}>
-        <Text style={styles.safiButtonTitle}>Quan és millor anar?</Text>
-        <Text style={styles.safiButtonText}>Compara disponibilitat i previsió SAFi.</Text>
-      </Pressable>
-
-      <View style={styles.row}>
-        <Pressable style={styles.secondary} onPress={() => navigation.navigate('MevesReserves')}>
-          <Text style={styles.secondaryText}>Reserves</Text>
-        </Pressable>
-        <Pressable style={styles.secondary} onPress={() => navigation.navigate('SafiChat')}>
-          <Text style={styles.secondaryText}>SAFi Chat</Text>
-        </Pressable>
+      <View style={styles.grid}>
+        <Tile icon="🎟️" label="Reserves" onPress={() => navigation.navigate('MevesReserves')} />
+        <Tile icon="💬" label="SAFi Chat" onPress={() => navigation.navigate('SafiChat')} />
+        <Tile icon="🏟️" label="Serveis" onPress={() => navigation.navigate('Serveis')} />
+        <Tile icon="📊" label="Heatmap" onPress={() => navigation.navigate('Heatmap')} />
       </View>
+    </ScreenContainer>
+  );
+}
 
-      <View style={styles.row}>
-        <Pressable style={styles.secondary} onPress={() => navigation.navigate('Serveis')}>
-          <Text style={styles.secondaryText}>Serveis</Text>
-        </Pressable>
-        <Pressable style={styles.secondary} onPress={() => navigation.navigate('Heatmap')}>
-          <Text style={styles.secondaryText}>Heatmap</Text>
-        </Pressable>
-      </View>
-    </View>
+function Tile({ icon, label, onPress }: { icon: string; label: string; onPress: () => void }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => [styles.tile, pressed && styles.pressed]}
+    >
+      <Text style={styles.tileIcon}>{icon}</Text>
+      <Text style={styles.tileLabel}>{label}</Text>
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, justifyContent: 'center' },
-  title: { fontSize: 32, fontWeight: 'bold', textAlign: 'center' },
-  subtitle: { fontSize: 16, color: '#666', textAlign: 'center', marginTop: 6, marginBottom: 20 },
-  nextCard: { borderWidth: 1, borderColor: '#ddd', borderRadius: 14, padding: 14, marginBottom: 18 },
-  cardLabel: { fontSize: 12, color: '#666', marginBottom: 4 },
-  cardTitle: { fontSize: 18, fontWeight: 'bold' },
-  cardText: { fontSize: 15, color: '#444', marginTop: 3 },
-  link: { color: '#1565c0', fontWeight: 'bold', marginTop: 8 },
-  button: { paddingVertical: 22, borderRadius: 16, backgroundColor: '#1565c0', alignItems: 'center' },
-  buttonText: { color: '#fff', fontSize: 25, fontWeight: 'bold' },
-  safiButton: { marginTop: 12, padding: 14, borderRadius: 14, backgroundColor: '#f3e8ff', borderWidth: 1, borderColor: '#9c27b0' },
-  safiButtonTitle: { fontSize: 17, fontWeight: 'bold', color: '#6a1b9a' },
-  safiButtonText: { fontSize: 14, color: '#555', marginTop: 2 },
-  row: { flexDirection: 'row', gap: 10, marginTop: 10 },
-  secondary: { flex: 1, paddingVertical: 13, borderRadius: 12, borderWidth: 1, borderColor: '#1565c0', alignItems: 'center' },
-  secondaryText: { color: '#1565c0', fontSize: 15, fontWeight: 'bold' },
+  flex: { flex: 1 },
+  brand: { ...typography.title, fontSize: 34, color: colors.primary },
+  subtitle: { ...typography.body, color: colors.textMuted, marginTop: spacing.xs, marginBottom: spacing.xl },
+  nextCard: { marginBottom: spacing.lg },
+  cardTitle: { ...typography.heading, marginTop: spacing.xs },
+  cardText: { ...typography.body, color: colors.textMuted, marginTop: spacing.xs },
+  linkBox: { minHeight: 44, justifyContent: 'center', marginTop: spacing.xs },
+  link: { color: colors.primary, fontWeight: '700', fontSize: 15 },
+  reserve: { minHeight: 68, borderRadius: radius.lg },
+  safiCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginTop: spacing.lg,
+    padding: spacing.lg,
+    borderRadius: radius.lg,
+    backgroundColor: colors.safiSoft,
+    borderWidth: 1,
+    borderColor: colors.safi,
+  },
+  safiIcon: { fontSize: 26 },
+  safiTitle: { fontSize: 17, fontWeight: '700', color: colors.safi },
+  safiText: { fontSize: 14, color: colors.textMuted, marginTop: 2 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.lg },
+  tile: {
+    flexGrow: 1,
+    flexBasis: '45%',
+    minHeight: 88,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadow.card,
+  },
+  tileIcon: { fontSize: 26 },
+  tileLabel: { fontSize: 15, fontWeight: '700', color: colors.primaryDark },
+  pressed: { opacity: 0.8, transform: [{ scale: 0.98 }] },
 });

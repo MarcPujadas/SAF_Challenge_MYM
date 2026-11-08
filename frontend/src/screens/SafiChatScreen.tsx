@@ -1,7 +1,7 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
+  Animated,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -11,9 +11,12 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import type { ScrollViewInstance } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { RootStackParamList } from '../navigation/types';
 import { chatSafi, errorMessage } from '../services/api';
+import { colors, radius, spacing, typography } from '../theme/theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'SafiChat'>;
 type ChatMessage = { id: number; from: 'user' | 'safi'; text: string; noAnswer?: boolean };
@@ -39,6 +42,8 @@ export default function SafiChatScreen(_props: Props) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const nextId = useRef(1);
+  const insets = useSafeAreaInsets();
+  const listRef = useRef<ScrollViewInstance>(null);
 
   async function sendMessage(rawText: string) {
     const text = rawText.trim();
@@ -66,15 +71,29 @@ export default function SafiChatScreen(_props: Props) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={90}
     >
-      <ScrollView contentContainerStyle={styles.list}>
+      <ScrollView
+        ref={listRef}
+        keyboardShouldPersistTaps="handled"
+        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+        contentContainerStyle={styles.list}
+      >
         {messages.length === 0 && (
           <>
-            <Text style={styles.intro}>Pregunta a SAFi sobre ocupació, disponibilitat o les teves reserves.</Text>
+            <View style={styles.introRow}>
+              <Avatar />
+              <Text style={styles.intro}>
+                Pregunta a SAFi sobre ocupació, disponibilitat o les teves reserves.
+              </Text>
+            </View>
             <View style={styles.suggestions}>
               {SUGGESTIONS.map((suggestion) => (
                 <Pressable
                   key={suggestion}
-                  style={styles.suggestion}
+                  style={({ pressed }) => [
+                    styles.suggestion,
+                    sending && styles.disabled,
+                    pressed && styles.pressed,
+                  ]}
                   disabled={sending}
                   onPress={() => void sendMessage(suggestion)}
                 >
@@ -85,40 +104,58 @@ export default function SafiChatScreen(_props: Props) {
           </>
         )}
 
-        {messages.map((message) => (
-          <View
-            key={message.id}
-            style={[styles.bubble, message.from === 'user' ? styles.user : styles.safi]}
-          >
-            {message.from === 'safi' && <Text style={styles.safiTitle}>SAFi</Text>}
-            <Text style={styles.text}>{message.text}</Text>
-            {message.noAnswer && (
-              <Text style={styles.noAnswer}>SAFi no té prou dades per respondre amb seguretat.</Text>
-            )}
-          </View>
-        ))}
+        {messages.map((message) =>
+          message.from === 'user' ? (
+            <View key={message.id} style={[styles.bubble, styles.user]}>
+              <Text style={styles.userText}>{message.text}</Text>
+            </View>
+          ) : (
+            <View key={message.id} style={styles.safiRow}>
+              <Avatar />
+              <View style={[styles.bubble, styles.safi, message.noAnswer && styles.safiNoAnswer]}>
+                <Text style={styles.text}>{message.text}</Text>
+                {message.noAnswer && (
+                  <Text style={styles.noAnswer}>SAFi no té prou dades per respondre amb seguretat.</Text>
+                )}
+              </View>
+            </View>
+          ),
+        )}
 
         {sending && (
-          <View style={styles.loadingRow}>
-            <ActivityIndicator />
-            <Text style={styles.muted}>  SAFi està pensant...</Text>
+          <View style={styles.safiRow}>
+            <Avatar />
+            <View style={[styles.bubble, styles.safi]}>
+              <TypingDots />
+            </View>
           </View>
         )}
-        {error && <Text style={styles.error}>{error}</Text>}
+        {error && (
+          <View style={styles.errorBox} accessibilityRole="alert">
+            <Text style={styles.error}>{error}</Text>
+          </View>
+        )}
       </ScrollView>
 
-      <View style={styles.inputRow}>
+      <View style={[styles.inputRow, { paddingBottom: spacing.md + insets.bottom }]}>
         <TextInput
           style={styles.input}
           value={input}
           onChangeText={setInput}
           placeholder="Escriu la teva pregunta"
+          placeholderTextColor={colors.textMuted}
           editable={!sending}
           onSubmitEditing={() => void sendMessage(input)}
           returnKeyType="send"
         />
         <Pressable
-          style={[styles.sendButton, (sending || !input.trim()) && styles.disabled]}
+          accessibilityRole="button"
+          accessibilityLabel="Enviar"
+          style={({ pressed }) => [
+            styles.sendButton,
+            (sending || !input.trim()) && styles.disabled,
+            pressed && styles.pressed,
+          ]}
           disabled={sending || !input.trim()}
           onPress={() => void sendMessage(input)}
         >
@@ -129,25 +166,119 @@ export default function SafiChatScreen(_props: Props) {
   );
 }
 
+function Avatar() {
+  return (
+    <View style={styles.avatar} accessibilityLabel="SAFi">
+      <Text style={styles.avatarText}>S</Text>
+    </View>
+  );
+}
+
+// Indicador "escrivint…" amb tres punts que pampalluguegen.
+function TypingDots() {
+  const dots = useRef([0, 1, 2].map(() => new Animated.Value(0.3))).current;
+  useEffect(() => {
+    const loops = dots.map((v, i) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(i * 160),
+          Animated.timing(v, { toValue: 1, duration: 320, useNativeDriver: true }),
+          Animated.timing(v, { toValue: 0.3, duration: 320, useNativeDriver: true }),
+        ]),
+      ),
+    );
+    loops.forEach((l) => l.start());
+    return () => loops.forEach((l) => l.stop());
+  }, [dots]);
+  return (
+    <View style={styles.typing} accessibilityLabel="SAFi està escrivint">
+      <Text style={styles.typingText}>escrivint</Text>
+      {dots.map((v, i) => (
+        <Animated.View key={i} style={[styles.dot, { opacity: v }]} />
+      ))}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  list: { padding: 16, paddingBottom: 24 },
-  intro: { color: '#555', marginBottom: 10, fontSize: 16 },
-  suggestions: { gap: 8, marginBottom: 18 },
-  suggestion: { padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#9c27b0', backgroundColor: '#faf5ff' },
-  suggestionText: { color: '#6a1b9a', fontWeight: '600' },
-  muted: { color: '#666', marginVertical: 8 },
-  error: { color: '#b00020', marginVertical: 8 },
-  bubble: { padding: 12, borderRadius: 12, marginBottom: 8, maxWidth: '85%' },
-  user: { alignSelf: 'flex-end', backgroundColor: '#e3f0ff' },
-  safi: { alignSelf: 'flex-start', backgroundColor: '#f3e8ff', borderWidth: 1, borderColor: '#9c27b0' },
-  noAnswer: { marginTop: 6, fontSize: 13, color: '#8a5a00', fontWeight: '600' },
-  safiTitle: { fontWeight: 'bold', color: '#6a1b9a', marginBottom: 4 },
-  text: { fontSize: 16 },
-  loadingRow: { flexDirection: 'row', alignItems: 'center' },
-  inputRow: { flexDirection: 'row', padding: 12, gap: 8, borderTopWidth: 1, borderColor: '#ddd' },
-  input: { flex: 1, borderWidth: 1, borderColor: '#ccc', borderRadius: 10, paddingHorizontal: 12, fontSize: 16 },
-  sendButton: { paddingHorizontal: 16, justifyContent: 'center', borderRadius: 10, backgroundColor: '#9c27b0' },
-  sendText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  flex: { flex: 1, backgroundColor: colors.background },
+  list: { padding: spacing.lg, paddingBottom: spacing.xl, flexGrow: 1 },
+  introRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, marginBottom: spacing.md },
+  intro: { ...typography.body, color: colors.textMuted, flex: 1 },
+  suggestions: { gap: spacing.sm, marginBottom: spacing.lg },
+  suggestion: {
+    minHeight: 44,
+    justifyContent: 'center',
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.safi,
+    backgroundColor: colors.safiSoft,
+  },
+  suggestionText: { color: colors.safi, fontWeight: '600' },
+  bubble: { padding: spacing.md, borderRadius: radius.lg, marginBottom: spacing.sm, maxWidth: '85%' },
+  user: { alignSelf: 'flex-end', backgroundColor: colors.primary, borderBottomRightRadius: radius.sm },
+  userText: { fontSize: 16, color: colors.textOnPrimary },
+  safiRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm, maxWidth: '100%' },
+  safi: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderBottomLeftRadius: radius.sm,
+    flexShrink: 1,
+  },
+  safiNoAnswer: { backgroundColor: colors.warningSoft, borderColor: colors.warningSoft },
+  text: { fontSize: 16, color: colors.text },
+  noAnswer: { marginTop: spacing.sm, fontSize: 13, color: colors.warning, fontWeight: '700' },
+  avatar: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.pill,
+    backgroundColor: colors.safi,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.sm,
+  },
+  avatarText: { color: colors.white, fontWeight: '800' },
+  typing: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  typingText: { fontSize: 14, color: colors.textMuted, marginRight: 2 },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.safi },
+  errorBox: {
+    backgroundColor: colors.dangerSoft,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginTop: spacing.sm,
+  },
+  error: { color: colors.danger, fontWeight: '600' },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: spacing.md,
+    paddingHorizontal: spacing.md,
+    gap: spacing.sm,
+    borderTopWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  input: {
+    flex: 1,
+    minHeight: 46,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.lg,
+    fontSize: 16,
+    color: colors.text,
+    backgroundColor: colors.background,
+  },
+  sendButton: {
+    minHeight: 46,
+    paddingHorizontal: spacing.lg,
+    justifyContent: 'center',
+    borderRadius: radius.pill,
+    backgroundColor: colors.primary,
+  },
+  sendText: { color: colors.textOnPrimary, fontSize: 16, fontWeight: '700' },
   disabled: { opacity: 0.4 },
+  pressed: { opacity: 0.8, transform: [{ scale: 0.98 }] },
 });

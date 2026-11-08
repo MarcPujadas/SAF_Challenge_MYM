@@ -1,12 +1,14 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import HeatmapGrid, { forecastCell, serviceSlotCell } from '../components/HeatmapGrid';
 import type { CellValue, HeatmapMode } from '../components/HeatmapGrid';
+import { Card, Chip, EmptyState, ErrorState, LoadingState, ScreenContainer } from '../components/ui';
 import type { RootStackParamList } from '../navigation/types';
 import { errorMessage, getHeatmap, getServiceAvailabilityWeek, getServices } from '../services/api';
 import type { Heatmap, Service, ServiceAvailabilityWeek } from '../services/api';
+import { colors, radius, spacing, typography } from '../theme/theme';
 import { addDays, daysFrom, formatRange, mondayOf, todayDate, weekdayShort } from '../utils/dates';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Heatmap'>;
@@ -146,42 +148,44 @@ export default function HeatmapScreen({ navigation, route }: Props) {
   const loaded = effectiveMode === 'availability' ? week !== null : forecast !== null;
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScreenContainer>
       <Text style={styles.step}>Servei</Text>
-      {servicesLoading && <ActivityIndicator />}
-      {servicesError && <ErrorBox text={servicesError} onRetry={loadServices} />}
+      {servicesLoading && <LoadingState lines={2} />}
+      {servicesError && <ErrorState message={servicesError} onRetry={loadServices} />}
       <View style={styles.chips}>
         {services?.map((s) => (
-          <Pressable
-            key={s.id}
-            style={[styles.chip, service?.id === s.id && styles.chipSelected]}
-            onPress={() => setService(s)}
-          >
-            <Text style={styles.chipText}>{s.name}</Text>
-          </Pressable>
+          <Chip key={s.id} label={s.name} selected={service?.id === s.id} onPress={() => setService(s)} />
         ))}
       </View>
 
       {service && (
         <>
+          <Text style={[styles.step, styles.stepGap]}>Què vols veure?</Text>
           <View style={styles.chips}>
-            <ModeButton
+            <Chip
               label="Disponibilitat"
               selected={effectiveMode === 'availability'}
               disabled={!canBook}
               onPress={() => setMode('availability')}
             />
-            <ModeButton
+            <Chip
               label="Previsió SAFi"
               selected={effectiveMode === 'forecast'}
               onPress={() => setMode('forecast')}
             />
           </View>
-          <Text style={styles.muted}>
-            {effectiveMode === 'availability'
-              ? 'Disponibilitat: reserves actuals.'
-              : 'Previsió SAFi: estimació històrica, no és ocupació en temps real.'}
-          </Text>
+
+          {/* Zona etiquetada: que representa el que es veu */}
+          <View style={[styles.zone, effectiveMode === 'forecast' && styles.zoneForecast]}>
+            <Text style={[styles.zoneTitle, effectiveMode === 'forecast' && styles.zoneTitleForecast]}>
+              {effectiveMode === 'availability' ? 'Disponibilitat actual' : 'Previsió SAFi'}
+            </Text>
+            <Text style={styles.zoneText}>
+              {effectiveMode === 'availability'
+                ? 'Disponibilitat: reserves actuals.'
+                : 'Previsió SAFi: estimació històrica, no és ocupació en temps real.'}
+            </Text>
+          </View>
           {!canBook && <Text style={styles.notice}>Servei no reservable: només previsió</Text>}
           {bestForecast && (
             <View style={styles.summaryBox}>
@@ -193,25 +197,38 @@ export default function HeatmapScreen({ navigation, route }: Props) {
           )}
 
           <View style={styles.weekNav}>
-            <Pressable onPress={() => setWeekStart(addDays(weekStart, -7))}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Setmana anterior"
+              style={({ pressed }) => [styles.weekBtn, pressed && styles.pressed]}
+              onPress={() => setWeekStart(addDays(weekStart, -7))}
+            >
               <Text style={styles.weekLink}>{'< Setmana anterior'}</Text>
             </Pressable>
             <Text style={styles.weekLabel}>{formatRange(weekStart, weekEnd)}</Text>
-            <Pressable onPress={() => setWeekStart(addDays(weekStart, 7))}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Setmana següent"
+              style={({ pressed }) => [styles.weekBtn, pressed && styles.pressed]}
+              onPress={() => setWeekStart(addDays(weekStart, 7))}
+            >
               <Text style={styles.weekLink}>{'Setmana següent >'}</Text>
             </Pressable>
           </View>
 
-          {loading && <ActivityIndicator />}
-          {error && <ErrorBox text={error} onRetry={loadData} />}
+          {loading && <LoadingState lines={5} />}
+          {error && <ErrorState message={error} onRetry={loadData} />}
           {!loading && !error && loaded && !hasData && (
-            <Text style={styles.muted}>
-              {effectiveMode === 'forecast'
-                ? notValidated
-                  ? 'Sense dades de previsió: encara no hi ha previsió validada per a aquest servei.'
-                  : 'Sense dades de previsió'
-                : 'No hi ha franges per a aquesta setmana'}
-            </Text>
+            <EmptyState
+              icon={effectiveMode === 'forecast' ? '📉' : '🗓️'}
+              title={
+                effectiveMode === 'forecast'
+                  ? notValidated
+                    ? 'Sense dades de previsió: encara no hi ha previsió validada per a aquest servei.'
+                    : 'Sense dades de previsió'
+                  : 'No hi ha franges per a aquesta setmana'
+              }
+            />
           )}
           {!loading && !error && loaded && hasData && effectiveMode === 'availability' && week && (
             <Text style={styles.muted}>
@@ -221,71 +238,62 @@ export default function HeatmapScreen({ navigation, route }: Props) {
             </Text>
           )}
           {!loading && !error && loaded && hasData && (
-            <HeatmapGrid
-              dates={dates}
-              rows={rows}
-              getCell={getCell}
-              mode={effectiveMode}
-              onCellPress={canBook ? pickCell : undefined}
-              isDisabled={(date, row) => date < today || isFull(date, row)}
-            />
+            <Card style={styles.gridCard}>
+              <HeatmapGrid
+                dates={dates}
+                rows={rows}
+                getCell={getCell}
+                mode={effectiveMode}
+                onCellPress={canBook ? pickCell : undefined}
+                isDisabled={(date, row) => date < today || isFull(date, row)}
+              />
+            </Card>
           )}
         </>
       )}
-    </ScrollView>
-  );
-}
-
-function ModeButton(props: {
-  label: string;
-  selected: boolean;
-  disabled?: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      style={[styles.chip, props.selected && styles.chipSelected, props.disabled && styles.disabled]}
-      disabled={props.disabled}
-      onPress={props.onPress}
-    >
-      <Text style={styles.chipText}>{props.label}</Text>
-    </Pressable>
-  );
-}
-
-function ErrorBox({ text, onRetry }: { text: string; onRetry: () => void }) {
-  return (
-    <View>
-      <Text style={styles.error}>{text}</Text>
-      <Pressable style={styles.retryButton} onPress={onRetry}>
-        <Text style={styles.retryText}>Tornar-ho a provar</Text>
-      </Pressable>
-    </View>
+    </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 16, paddingBottom: 48 },
-  step: { fontSize: 18, fontWeight: 'bold', marginBottom: 8 },
-  muted: { color: '#666', marginVertical: 8 },
-  notice: { color: '#8a5a00', marginVertical: 4, fontWeight: 'bold' },
-  summaryBox: { marginTop: 8, padding: 12, borderRadius: 10, backgroundColor: '#f3e8ff', borderWidth: 1, borderColor: '#9c27b0' },
-  summaryTitle: { color: '#6a1b9a', fontWeight: 'bold' },
-  summaryText: { marginTop: 2, fontSize: 15 },
-  error: { color: '#b00020', marginVertical: 8 },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
-  chip: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, borderColor: '#ccc' },
-  chipSelected: { borderColor: '#1565c0', backgroundColor: '#e3f0ff' },
-  chipText: { fontSize: 15 },
-  disabled: { opacity: 0.4 },
+  step: { ...typography.heading, marginBottom: spacing.sm },
+  stepGap: { marginTop: spacing.xl },
+  muted: { ...typography.caption, marginVertical: spacing.sm },
+  notice: { color: colors.warning, marginVertical: spacing.sm, fontWeight: '700' },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  zone: {
+    marginTop: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.primarySoft,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.primary,
+  },
+  zoneForecast: { backgroundColor: colors.safiSoft, borderLeftColor: colors.safi },
+  zoneTitle: { fontSize: 15, fontWeight: '800', color: colors.primaryDark },
+  zoneTitleForecast: { color: colors.safi },
+  zoneText: { ...typography.caption, marginTop: 2 },
+  summaryBox: {
+    marginTop: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.safiSoft,
+    borderWidth: 1,
+    borderColor: colors.safi,
+  },
+  summaryTitle: { color: colors.safi, fontWeight: '700' },
+  summaryText: { marginTop: 2, fontSize: 15, color: colors.text },
   weekNav: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginVertical: 14,
+    flexWrap: 'wrap',
+    marginVertical: spacing.md,
+    gap: spacing.xs,
   },
-  weekLink: { color: '#1565c0', fontSize: 13 },
-  weekLabel: { fontWeight: 'bold', fontSize: 15 },
-  retryButton: { padding: 12, borderRadius: 10, backgroundColor: '#eee', alignItems: 'center' },
-  retryText: { fontSize: 16 },
+  weekBtn: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.xs },
+  weekLink: { color: colors.primary, fontSize: 13, fontWeight: '700' },
+  weekLabel: { fontWeight: '800', fontSize: 15, color: colors.text },
+  gridCard: { padding: spacing.md },
+  pressed: { opacity: 0.6 },
 });

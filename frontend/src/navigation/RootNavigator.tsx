@@ -8,12 +8,21 @@ import ReservaScreen from '../screens/ReservaScreen';
 import SafiChatScreen from '../screens/SafiChatScreen';
 import ServeisScreen from '../screens/ServeisScreen';
 import type { RootStackParamList } from './types';
+import { colors } from '../theme/theme';
 
 const Stack = createStackNavigator<RootStackParamList>();
 
 export default function RootNavigator() {
   return (
-    <Stack.Navigator initialRouteName="Home">
+    <Stack.Navigator
+      initialRouteName="Home"
+      screenOptions={{
+        headerStyle: { backgroundColor: colors.primary },
+        headerTintColor: colors.textOnPrimary,
+        headerTitleStyle: { fontWeight: '700' },
+        cardStyle: { backgroundColor: colors.background },
+      }}
+    >
       <Stack.Screen
         name="Home"
         component={HomeScreen}
