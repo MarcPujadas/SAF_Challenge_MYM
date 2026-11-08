@@ -112,6 +112,7 @@ def test_padel_mapping_includes_virtual_second_court(catalog_client):
 
     assert len(padel_resources) == 4
     assert pista_2["is_virtual"] is True
+    assert pista_2["reservable"] is True
     assert pista_2["capacity_mode"] == "resource_units"
     assert pista_2["reservation_capacity"] == 1
     assert pista_2["person_capacity"] is None
@@ -142,7 +143,7 @@ def test_all_non_virtual_mapped_resources_exist_and_quality_report_passes(
         "declared": True,
         "mapped": True,
         "virtual": True,
-        "space_exists": False,
+        "space_exists": True,
     }
 
 

@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from app.common import ApiError
+from app.config.service_spaces import conflicting_space_ids
 from app.database.database import get_connection
 from app.services.catalog_service import get_space
 from app.services.historical_service import get_historical_occupancy
@@ -27,14 +28,18 @@ def _confirmed_intervals(
     space_id: str,
     date_value: str,
 ) -> list[tuple[int, int]]:
+    blocking_space_ids = (space_id, *conflicting_space_ids(space_id))
+    placeholders = ", ".join("?" for _ in blocking_space_ids)
     with closing(get_connection()) as connection:
         rows = connection.execute(
-            """
+            f"""
             SELECT start, end
             FROM reservations
-            WHERE space_id = ? AND date = ? AND status = 'confirmed'
+            WHERE space_id IN ({placeholders})
+                AND date = ?
+                AND status = 'confirmed'
             """,
-            (space_id, date_value),
+            (*blocking_space_ids, date_value),
         ).fetchall()
     return [
         (time_to_minutes(row["start"]), time_to_minutes(row["end"]))
@@ -141,19 +146,25 @@ def get_week_availability(
             "'from' must be on or before 'to'.",
         )
     space = _require_reservable_space(space_id)
+    blocking_space_ids = (space_id, *conflicting_space_ids(space_id))
+    placeholders = ", ".join("?" for _ in blocking_space_ids)
     with closing(get_connection()) as connection:
         rows = connection.execute(
-            """
+            f"""
             SELECT date, start, end
             FROM reservations
             WHERE
-                space_id = ?
+                space_id IN ({placeholders})
                 AND date >= ?
                 AND date <= ?
                 AND status = 'confirmed'
             ORDER BY date, start
             """,
-            (space_id, start_date.isoformat(), end_date.isoformat()),
+            (
+                *blocking_space_ids,
+                start_date.isoformat(),
+                end_date.isoformat(),
+            ),
         ).fetchall()
 
     intervals_by_date: dict[str, list[tuple[int, int]]] = {}
@@ -235,16 +246,22 @@ def get_service_week_availability(
             (service_id,),
         ).fetchall()
         reservations = connection.execute(
-            """
+            f"""
             SELECT space_id, date, start, end, participants_count
             FROM reservations
-            WHERE service_id = ?
+            WHERE space_id IN (
+                {", ".join("?" for _ in resources)}
+            )
                 AND date >= ?
                 AND date <= ?
                 AND status = 'confirmed'
             ORDER BY date, start
             """,
-            (service_id, start_date.isoformat(), end_date.isoformat()),
+            (
+                *(row["space_id"] for row in resources),
+                start_date.isoformat(),
+                end_date.isoformat(),
+            ),
         ).fetchall()
 
     if not resources:
@@ -295,9 +312,18 @@ def get_service_week_availability(
                 space_id = resource["space_id"]
                 if (start_minutes, end_minutes) not in resource_slots[space_id]:
                     continue
-                intervals = reservations_by_resource_date.get(
-                    (space_id, date_string), []
+                blocking_space_ids = (
+                    space_id,
+                    *conflicting_space_ids(space_id),
                 )
+                intervals = [
+                    interval
+                    for blocking_space_id in blocking_space_ids
+                    for interval in reservations_by_resource_date.get(
+                        (blocking_space_id, date_string),
+                        [],
+                    )
+                ]
                 used_reservations = sum(
                     overlaps(start_minutes, end_minutes, start, end)
                     for start, end, _ in intervals

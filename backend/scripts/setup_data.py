@@ -43,6 +43,7 @@ HISTORICAL_PATH = (
     / "processed"
     / "historical_occupancy.csv"
 )
+EXPECTED_SPACE_COUNT = 43
 
 
 def reset_database():
@@ -128,9 +129,9 @@ def validate_setup():
 
     errors = []
 
-    if summary["spaces"] != 40:
+    if summary["spaces"] != EXPECTED_SPACE_COUNT:
         errors.append(
-            f"Expected 40 spaces, found "
+            f"Expected {EXPECTED_SPACE_COUNT} spaces, found "
             f"{summary['spaces']}."
         )
 

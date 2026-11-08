@@ -263,8 +263,9 @@ El mapping reusable separa normalització de text, registry d'alias,
 jerarquia de recursos i estats `mapped`, `manual_review` i `ignored`.
 Els registres amb recursos ambigus es conserven a `historical_usage` com a
 `manual_review`; no es converteixen en scores fins que la relació es revisi.
-El registry documenta la correcció de Pàdel Pista 2 i els vuit carrils de la
-piscina de 25 m. No s'infereixen subdivisions de camps de futbol.
+El registry documenta Pàdel Pista 2 i els vuit carrils de la piscina de
+25 m. També conserva Camp 4.1 i Camp 4.2 com a recursos separats perquè les
+reserves originals els identifiquen explícitament com a meitats del Camp 4.
 
 La projecció compatible generada es guarda a:
 
@@ -309,10 +310,12 @@ idempotent i s'executa en inicialitzar la base de dades i després d'importar
 espais o serveis.
 
 El mapping central és a `app/config/service_spaces.py`. Inclou vuit carrils
-per a piscina de 25 m i quatre pistes de pàdel, tennis, esquaix i futbol quan
-correspon. Pàdel Pista 2 es conserva com a recurs virtual si manca a SQLite,
-perquè apareix al mapping de l'històric normalitzat; no es modifica el fitxer
-font ni s'inventa capacitat de persones.
+per a piscina de 25 m, quatre pistes de pàdel, tennis i esquaix, quatre camps
+de futbol i les dues opcions de mitja pista del Camp 4. Si el full d'espais no
+conté Pàdel Pista 2 o les meitats de Camp 4, el seed crea una entitat
+reservable d'una unitat i manté `is_virtual` per traçar-ne l'origen al mapping.
+El camp complet entra en conflicte amb cada meitat; les dues meitats no
+entren en conflicte entre si.
 
 `data_sources` registra els imports SAF (`saf_reserves_2026` i
 `saf_guided_activities_2026`) i les reserves operatives de l'aplicació
@@ -324,6 +327,27 @@ actualitza les mateixes files, mentre que una nova versió del fitxer es manté
 com a versió històrica separada. `people_count`, `occupied_units` i
 `occupancy_ratio` queden nuls quan no es poden justificar amb la semàntica de
 la font. Les reserves de l'app continuen només a `reservations`.
+
+Les piscines mantenen `capacity_mode=people` per a disponibilitat operativa,
+amb capacitats de persones importades del catàleg SAF. Les files de reserves
+històriques no indiquen quantes persones hi havia a cada carril; per tant,
+no s'agreguen en forecast i retornen `unknown` fins que hi hagi mètriques
+comparables de persones o ocupació. Fitness pot utilitzar el score relatiu
+compatible de `historical_occupancy.csv` per weekday i franja, sense convertir
+el recompte de reserves en `people_count` ni en percentatge d'aforament.
+
+Les sessions d'activitats dirigides sempre conserven el servei
+`guided-activities`, la ubicació raw i la capacitat pròpia de la sessió.
+Quan existeixen `peak_enrolled` i `session_capacity`, el ratio de sessió és
+el quocient entre aquests valors; no s'utilitza com a capacitat física de la
+sala. Les ubicacions fora del mapping inequívoc continuen en `manual_review`.
+
+El catàleg principal és una selecció de producte, no un inventari complet:
+només publica els vuit serveis de `app/config/services.py`. Els espais del
+full SAF sense relació activa a `service_spaces` i els serveis no seleccionats
+per a aquesta llista queden fora de l'MVP per manca d'una decisió revisada de
+mapping, capacitat i horaris. No aparèixer al catàleg no vol dir que l'espai
+no existeixi; es pot revisar amb els informes de qualitat.
 
 Per executar l'informe de qualitat del mapping des de `backend/`:
 
@@ -619,25 +643,32 @@ Exemple:
 ## Dissabte
 
 ```text
-08:00
-09:30
+08:30
+09:45
 11:00
-12:30
-14:00
-15:30
-17:00
+12:15
+13:30
+14:45
+16:00
+17:15
 18:30
 ```
 
 ## Diumenge
 
 ```text
-09:30
+09:45
 11:00
-12:30
+12:15
 ```
 
-Les hores anòmales trobades al dataset, com algunes reserves puntuals a `09:15`, `11:45`, `15:00` o `20:00`, no es consideren torns habituals.
+Aquestes són les franges configurades a `app/config/schedules.py`, no una
+confirmació dels horaris públics actuals del SAF. Les franges observades al
+històric inclouen hores addicionals i blocs especials, que no són suficients
+per definir slots públics. El full local `Horari general` només acredita
+horaris d'obertura generals. La configuració de cap de setmana queda pendent
+de contrastar amb una font oficial específica de Fitness; no s'ha canviat per
+inferència a partir de les reserves.
 
 ---
 
@@ -890,6 +921,20 @@ camps retornen `null`.
 menys ocupació. Si se sol·licita un espai sense dades al període, les mètriques
 retornen `null`.
 
+Els dominis de les mètriques no es combinen:
+
+- Ocupació, tendències i heatmaps utilitzen l'històric SAF processat, no les
+  reserves de l'aplicació. Els endpoints històrics accepten període i, quan
+  s'ha definit, `space_id`; no ofereixen un filtre de font o de servei que no
+  puguin representar correctament les dades de compatibilitat.
+- Cancel·lacions i reserves consulten exclusivament `reservations` i són ús
+  operatiu de l'app, no assistència observada.
+- L'impacte SAFi i les seves estadístiques consulten
+  `recommendations`/`recommendation_actions`; aquests endpoints admeten
+  `service_id`, `space_id` i període.
+
+Cap d'aquestes mètriques presenta les reserves com a assistència real.
+
 ## Heatmap històric
 
 ```text
@@ -1082,6 +1127,7 @@ Per mantenir el projecte simple i demostrable durant la Hackathon:
 - No s'utilitza Machine Learning complex.
 - El recomanador és estadístic i explicable.
 - No totes les variants de recursos del dataset es poden relacionar amb seguretat.
-- Els recursos amb correspondència ambigua es descarten.
+- Els recursos amb correspondència ambigua es conserven a `historical_usage`
+  com a `manual_review`; no s'utilitzen per generar mètriques.
 
 Aquestes decisions són intencionades per prioritzar un MVP estable, demostrable i basat en dades reals.

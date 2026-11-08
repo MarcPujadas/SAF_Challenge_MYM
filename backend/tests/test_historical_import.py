@@ -29,6 +29,7 @@ def history_client(tmp_path, monkeypatch):
                 ("piscina-25-metres-carrer-1", "pool", 8),
                 ("pistes-de-padel-pista-1", "court", 1),
                 ("sales-activitats-dirigides-sala-1", "activity_room", 20),
+                ("sales-activitats-dirigides-sala-4", "activity_room", 35),
                 (FITNESS_SPACE_ID, "fitness", 40),
                 (TENNIS_SPACE_ID, "court", 1),
             )
@@ -128,6 +129,12 @@ def test_resource_registry_maps_padel_two_and_known_resource_ranges():
     squash_4 = resolve_resource_mapping("Esquaix/C.Soccer - Pista 4")
     football_4 = resolve_resource_mapping("Futbol 7 - Camps 4")
     subdivision = resolve_resource_mapping("Futbol 7 - Mitja pista 1")
+    camp_4_half_1 = resolve_resource_mapping(
+        "FUTBOL 7-CAMP 4.1 (1/2 CAMP) (dl-dv)"
+    )
+    camp_4_half_2 = resolve_resource_mapping(
+        "FUTBOL 7-CAMP 4.2 (1/2 CAMP) (dl-dv)"
+    )
     unknown = resolve_resource_mapping("Unmapped sports resource")
 
     assert (padel.service_id, padel.space_id, padel.mapping_status) == (
@@ -140,6 +147,10 @@ def test_resource_registry_maps_padel_two_and_known_resource_ranges():
     assert squash_4.space_id == "esquaix-esquaix-4"
     assert football_4.space_id == "futbol-7-camp-4"
     assert subdivision.mapping_status == "manual_review"
+    assert camp_4_half_1.space_id == "futbol-7-camp-4-1"
+    assert camp_4_half_1.capacity_share == 0.5
+    assert camp_4_half_2.space_id == "futbol-7-camp-4-2"
+    assert camp_4_half_2.capacity_share == 0.5
     assert subdivision.service_id == "football"
     assert unknown.mapping_status == "manual_review"
     assert unknown.raw_resource_name == "Unmapped sports resource"
@@ -336,7 +347,17 @@ def test_actual_guided_session_columns_preserve_people_metrics(
                 "end_time": "18:50",
                 "capacity": 30,
                 "peak_enrolled": 21,
-                "peak_occupancy_pct": 70,
+                "peak_occupancy_pct": None,
+            },
+            {
+                "session_id": "ga-test-3",
+                "session_date": "2026-04-01",
+                "room": "sala fitness",
+                "start_time": "19:00",
+                "end_time": "19:50",
+                "capacity": 20,
+                "peak_enrolled": 10,
+                "peak_occupancy_pct": 50,
             },
         ]
     )
@@ -347,16 +368,26 @@ def test_actual_guided_session_columns_preserve_people_metrics(
             connection=connection,
         )
 
-    mapped, manual_review = rows
+    mapped, mapped_sala_4, manual_review_fitness = rows
     assert mapped["raw_resource_name"] == "sala 1"
     assert mapped["space_id"] == "sales-activitats-dirigides-sala-1"
     assert mapped["people_count"] == 25
     assert mapped["capacity_people_snapshot"] == 35
-    assert mapped["occupancy_ratio"] == 0.71
+    assert mapped["occupancy_ratio"] == 0.7143
     assert mapped["raw_reservation_count"] is None
-    assert manual_review["mapping_status"] == "manual_review"
-    assert manual_review["raw_resource_name"] == "sala 4"
-    assert manual_review["people_count"] == 21
+    assert mapped_sala_4["service_id"] == "guided-activities"
+    assert mapped_sala_4["space_id"] == "sales-activitats-dirigides-sala-4"
+    assert mapped_sala_4["mapping_status"] == "mapped"
+    assert mapped_sala_4["raw_resource_name"] == "sala 4"
+    assert mapped_sala_4["people_count"] == 21
+    assert mapped_sala_4["capacity_people_snapshot"] == 30
+    assert mapped_sala_4["occupancy_ratio"] == 0.7
+    assert manual_review_fitness["service_id"] == "guided-activities"
+    assert manual_review_fitness["space_id"] == FITNESS_SPACE_ID
+    assert manual_review_fitness["mapping_status"] == "manual_review"
+    assert manual_review_fitness["people_count"] == 10
+    assert manual_review_fitness["capacity_people_snapshot"] == 20
+    assert manual_review_fitness["occupancy_ratio"] == 0.5
 
 
 def test_historical_quality_report_measures_row_and_volume_coverage(
@@ -396,7 +427,22 @@ def test_historical_quality_report_measures_row_and_volume_coverage(
     assert report["service_summary"]["football"]["physical_fields"] == 0
     assert report["service_summary"]["football"][
         "documented_subdivisions"
-    ] == []
+    ] == [
+        {
+            "service_id": "football",
+            "parent_space_id": "futbol-7-camp-4",
+            "space_id": "futbol-7-camp-4-1",
+            "label": "Camp 4.1",
+            "capacity_share": "0.5",
+        },
+        {
+            "service_id": "football",
+            "parent_space_id": "futbol-7-camp-4",
+            "space_id": "futbol-7-camp-4-2",
+            "label": "Camp 4.2",
+            "capacity_share": "0.5",
+        },
+    ]
     assert report["service_summary"]["guided-activities"][
         "classified_locations"
     ] == 1

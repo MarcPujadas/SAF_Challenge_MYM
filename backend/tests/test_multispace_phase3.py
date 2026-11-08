@@ -1,6 +1,7 @@
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 
+import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
@@ -148,6 +149,38 @@ def test_service_week_availability_aggregates_units_and_people(phase3_client):
     assert fitness_slot["remaining_people_capacity"] == 7
 
 
+def test_pool_forecast_stays_unknown_without_people_metrics(phase3_client):
+    pool_spaces = phase3_client.get(
+        "/api/v1/services/pool-25m/spaces"
+    ).json()["data"]
+    heatmap = phase3_client.get(
+        "/api/v1/availability/heatmap",
+        params={
+            "service_id": "pool-25m",
+            "from": TEST_DATE,
+            "to": TEST_DATE,
+        },
+    ).json()["data"]
+
+    assert len(pool_spaces) == 8
+    assert {
+        item["space_id"] for item in pool_spaces
+    } == {
+        f"piscina-25-metres-carrer-{number}"
+        for number in range(1, 9)
+    }
+    assert heatmap["aggregate"] is False
+    assert heatmap["unavailable_reason"] == (
+        "aggregated_forecast_not_validated"
+    )
+    assert all(
+        slot["occupancy_score"] is None
+        and slot["occupancy_level"] == "unknown"
+        for day in heatmap["days"]
+        for slot in day["slots"]
+    )
+
+
 def test_service_reservation_autoassigns_and_cancellation_releases_capacity(
     phase3_client,
 ):
@@ -186,6 +219,150 @@ def test_service_reservation_autoassigns_and_cancellation_releases_capacity(
         if slot["start"] == "18:30"
     )
     assert slot_after_cancel["available_units"] == 5
+
+
+def test_padel_pista_2_is_available_and_autoassigned_when_first_is_full(
+    phase3_client,
+):
+    with database.get_connection() as connection:
+        connection.execute(
+            "INSERT INTO users (id, name) VALUES (?, ?)",
+            ("padel-user-2", "Padel User 2"),
+        )
+
+    spaces = phase3_client.get(
+        "/api/v1/services/padel/spaces"
+    ).json()["data"]
+    pista_2 = next(
+        item
+        for item in spaces
+        if item["space_id"] == "pistes-de-padel-pista-2"
+    )
+    first = _create(
+        phase3_client,
+        user_id="demo-user",
+        service_id="padel",
+        space_id="pistes-de-padel-pista-1",
+    )
+    second = _create(
+        phase3_client,
+        user_id="padel-user-2",
+        service_id="padel",
+    )
+
+    assert pista_2["is_virtual"] is True
+    assert pista_2["reservable"] is True
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["data"]["space_id"] == "pistes-de-padel-pista-2"
+
+    week = phase3_client.get(
+        "/api/v1/services/padel/availability/week",
+        params={"from": TEST_DATE, "to": TEST_DATE},
+    ).json()["data"]
+    slot = next(
+        slot
+        for slot in week["days"][0]["slots"]
+        if slot["start"] == "18:30"
+    )
+    availability = {
+        item["space_id"]: item["available"]
+        for item in slot["spaces"]
+    }
+    assert week["capacity_mode"] == "unit"
+    assert availability["pistes-de-padel-pista-1"] is False
+    assert availability["pistes-de-padel-pista-2"] is False
+    assert availability["pistes-de-padel-pista-3"] is True
+    assert availability["pistes-de-padel-pista-4"] is True
+
+    phase3_client.delete(
+        f"/api/v1/reservations/{second.json()['data']['reservation_id']}"
+    )
+    released = phase3_client.get(
+        "/api/v1/services/padel/availability/week",
+        params={"from": TEST_DATE, "to": TEST_DATE},
+    ).json()["data"]
+    released_slot = next(
+        slot
+        for slot in released["days"][0]["slots"]
+        if slot["start"] == "18:30"
+    )
+    released_availability = {
+        item["space_id"]: item["available"]
+        for item in released_slot["spaces"]
+    }
+    assert released_availability["pistes-de-padel-pista-1"] is False
+    assert released_availability["pistes-de-padel-pista-2"] is True
+
+
+@pytest.mark.parametrize(
+    ("first_space", "second_space", "conflict_expected"),
+    [
+        ("futbol-7-camp-4", "futbol-7-camp-4-1", True),
+        ("futbol-7-camp-4", "futbol-7-camp-4-2", True),
+        ("futbol-7-camp-4-1", "futbol-7-camp-4", True),
+        ("futbol-7-camp-4-1", "futbol-7-camp-4-2", False),
+    ],
+)
+def test_football_full_and_half_field_conflicts(
+    phase3_client,
+    first_space,
+    second_space,
+    conflict_expected,
+):
+    with database.get_connection() as connection:
+        connection.executemany(
+            "INSERT INTO users (id, name) VALUES (?, ?)",
+            [
+                ("football-user-1", "Football User 1"),
+                ("football-user-2", "Football User 2"),
+            ],
+        )
+
+    first = reservation_service.create_reservation(
+        "football-user-1",
+        first_space,
+        TEST_DATE,
+        "18:00",
+        "19:00",
+        service_id="football",
+    )
+    second_availability = phase3_client.get(
+        "/api/v1/availability/week",
+        params={
+            "space_id": second_space,
+            "from": TEST_DATE,
+            "to": TEST_DATE,
+        },
+    ).json()["data"]
+    second_slot = next(
+        slot
+        for slot in second_availability["days"][0]["slots"]
+        if slot["start"] == "18:00"
+    )
+    assert second_slot["available"] is not conflict_expected
+
+    if conflict_expected:
+        with pytest.raises(ApiError) as conflict:
+            reservation_service.create_reservation(
+                "football-user-2",
+                second_space,
+                TEST_DATE,
+                "18:00",
+                "19:00",
+                service_id="football",
+            )
+        assert conflict.value.code == "SLOT_NOT_AVAILABLE"
+    else:
+        second = reservation_service.create_reservation(
+            "football-user-2",
+            second_space,
+            TEST_DATE,
+            "18:00",
+            "19:00",
+            service_id="football",
+        )
+        assert first["space_id"] != second["space_id"]
 
 
 def test_service_reservation_validates_membership_and_preserves_old_payload(
@@ -473,6 +650,125 @@ def test_valid_service_recommendation_uses_normalized_people_history(
     ).json()["data"]
     assert impact["services"][0]["service_id"] == "fitness"
     assert impact["services"][0]["recommendations_generated"] == 1
+
+
+def test_future_fitness_forecast_uses_comparable_legacy_history(
+    phase3_client,
+    monkeypatch,
+):
+    history = pd.DataFrame(
+        [
+            (FITNESS_SPACE_ID, date_value, 1, start_time, reservations)
+            for date_value, counts in (
+                ("2026-04-07", (9, 2)),
+                ("2026-04-14", (10, 3)),
+                ("2026-04-21", (8, 1)),
+            )
+            for start_time, reservations in zip(
+                ("18:30", "19:45"),
+                counts,
+            )
+        ],
+        columns=[
+            "space_id",
+            "date",
+            "weekday",
+            "start_time",
+            "reservations",
+        ],
+    )
+    monkeypatch.setattr(
+        historical_service,
+        "load_historical_data",
+        lambda: history.copy(),
+    )
+
+    comparable = historical_service.get_historical_occupancy(
+        FITNESS_SPACE_ID,
+        1,
+        "18:30",
+    )
+    forecast = historical_service.get_service_historical_occupancy(
+        "fitness",
+        1,
+        "18:30",
+    )
+    heatmap = historical_service.get_service_historical_heatmap(
+        "fitness",
+        "2026-11-10",
+        "2026-11-10",
+    )
+    recommendation = phase3_client.post(
+        "/api/v1/recommendations",
+        json={
+            "service_id": "fitness",
+            "date": "2026-11-10",
+            "preferred_start": "18:30",
+            "preferred_end": "19:45",
+        },
+    ).json()["data"]
+    heatmap_slot = next(
+        slot
+        for slot in heatmap["days"][0]["slots"]
+        if slot["hour"] == "18:30"
+    )
+
+    assert forecast["source"] == "historical_occupancy.csv"
+    assert forecast["samples"] == 3
+    assert forecast["occupancy_score"] == comparable["occupancy_score"]
+    assert forecast["occupancy_ratio"] is None
+    assert heatmap["source"] == "historical_occupancy.csv"
+    assert heatmap_slot["samples"] == 3
+    assert heatmap_slot["occupancy_score"] == comparable["occupancy_score"]
+    assert recommendation["recommendation_id"] is not None
+    assert recommendation["requested_slot"]["occupancy_score"] == (
+        comparable["occupancy_score"]
+    )
+    assert recommendation["recommended_slot"]["start"] == "19:45"
+
+
+def test_future_fitness_without_comparable_samples_stays_unknown(
+    phase3_client,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        historical_service,
+        "load_historical_data",
+        lambda: pd.DataFrame(
+            columns=[
+                "space_id",
+                "date",
+                "weekday",
+                "start_time",
+                "reservations",
+            ]
+        ),
+    )
+
+    forecast = historical_service.get_service_historical_occupancy(
+        "fitness",
+        1,
+        "18:30",
+    )
+    recommendation = phase3_client.post(
+        "/api/v1/recommendations",
+        json={
+            "service_id": "fitness",
+            "date": "2026-11-10",
+            "preferred_start": "18:30",
+            "preferred_end": "19:45",
+        },
+    ).json()["data"]
+
+    assert forecast["occupancy_score"] is None
+    assert forecast["occupancy_level"] == "unknown"
+    assert forecast["samples"] == 0
+    assert forecast["unavailable_reason"] == "historical_data_unavailable"
+    assert recommendation["recommendation_available"] is False
+    assert recommendation["requested_slot"]["occupancy_score"] is None
+    assert recommendation["unavailable_reason"] == (
+        "historical_data_unavailable"
+    )
 
 
 def test_service_recommendation_tracking_stores_service_without_proxy_space(
