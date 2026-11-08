@@ -10,6 +10,8 @@ SAFi ajuda els usuaris del Servei d'Activitat Fisica (SAF) de la UAB a **consult
 | --- | --- |
 | Executar l'aplicacio SAFi a l'ordinador (Expo Web) | `iniciar_app.bat` |
 | Executar el portal web i panell d'administracio | `iniciar_web.bat` |
+| Executar l'app al mòbil amb Expo Go (mateixa Wi-Fi) | `iniciar_app_mobil.bat` |
+| Comprovar els endpoints reals de l'API | `scripts/verificar_api.ps1` |
 
 Els dos iniciadors configuren l'entorn Python, instal-len dependències, creen dades **sintetiques** de demo si no hi ha dades locals i inicien el backend si encara no esta executant-se. Cal esperar que els servidors acabin d'arrencar; no tanquis les finestres de terminal.
 
@@ -19,6 +21,16 @@ Els dos iniciadors configuren l'entorn Python, instal-len dependències, creen d
 - App Expo Web: URL que mostra Expo al terminal (habitualment port 8081).
 
 **L'app al navegador** no requereix un telefon ni una connexio Wi-Fi entre dispositius. Per a un telefon fisic, cal configurar la IP local del PC a `frontend/.env` i iniciar Expo en mode LAN. Vegeu [instal-lacio](docs/08_instalacio.md).
+
+## Si l'app mostra 'No hi ha connexio amb el servidor'
+
+`/health` no comprova la resta de les API. Executa al directori arrel:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verificar_api.ps1
+```
+
+Si fas servir **Expo Go al mòbil**, no executis només `iniciar_app.bat`: fes servir `iniciar_app_mobil.bat` i comprova que el mòbil pot obrir `http://IP_DEL_PC:8000/health`. Consulta [diagnostic de connexio](docs/12_diagnostic_connexio.md). L'app ara mostra l'URL i el detall de la fallada.
 
 ## Clau del LLM (Ornith UAB)
 
@@ -36,7 +48,7 @@ El fitxer `backend/.env` esta ignorat per Git i **no s'ha d'incloure a l'entrega
 - `frontend/`: aplicacio Expo/React Native.
 - `web/`: portal de reserves i dashboard de direccio (React/Vite).
 - `scripts/`: preparacio de Windows.
-- `docs/`: arquitectura, funcionament intern, contractes, fonts, tests i limitacions.
+- `docs/`: arquitectura, funcionament intern, contractes, fonts, tests i limitacions; `docs/archive/`: idees i tasques historiques.
 - `demo/`: guia per enregistrar una demostracio verificable.
 - `iniciar_app.bat`, `iniciar_web.bat`: iniciadors Windows.
 
@@ -52,6 +64,8 @@ El fitxer `backend/.env` esta ignorat per Git i **no s'ha d'incloure a l'entrega
 8. [Instal-lacio Windows](docs/08_instalacio.md)
 9. [Proves i limitacions](docs/09_proves_limitacions.md)
 10. [Guia d'entrega](docs/10_entrega.md)
+11. [Estat i neteja de branques](docs/11_estat_branques.md)
+12. [Diagnòstic de connexio](docs/12_diagnostic_connexio.md)
 
 També es conserven les especificacions originals `architecture.md`, `contracts.md` i `backend/README.md`, que poden contenir decisions historriques; per preparar l'entrega, prioritza la documentacio `docs/`.
 
