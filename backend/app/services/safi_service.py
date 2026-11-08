@@ -4,17 +4,19 @@ from datetime import date, timedelta
 from typing import Any
 
 from app.config.services import (
+    SERVICE_BY_ID,
     SERVICE_SEARCH_PHRASES,
     SPACE_ID_BY_ALIAS,
     supports_safi_recommendations,
 )
 from app.services.historical_service import (
     get_historical_occupancy,
+    get_service_historical_occupancy,
+    get_service_quietest_slot,
 )
 from app.services.recommendation_service import (
-    get_best_day_alternative,
-    get_quietest_slot,
     recommend,
+    recommend_service,
 )
 from app.services.validation import WEEKDAYS_CA, validate_date_time
 
@@ -45,6 +47,14 @@ def detect_space_id(message: str) -> str | None:
     for phrase, service_id in SERVICE_PHRASES:
         if phrase in normalized:
             return SPACE_ID_BY_ALIAS[service_id]
+    return None
+
+
+def detect_service_id(message: str) -> str | None:
+    normalized = normalize_text(message)
+    for phrase, service_id in SERVICE_PHRASES:
+        if phrase in normalized:
+            return service_id
     return None
 
 
@@ -108,7 +118,7 @@ def has_better_alternative(
 
 
 def occupancy_message(
-    space_id: str,
+    service_id: str,
     weekday: int,
     requested: dict[str, Any],
     alternative: dict[str, Any] | None,
@@ -120,11 +130,19 @@ def occupancy_message(
 
     start = requested["start"]
     weekday_name = WEEKDAYS_CA[weekday]
-    samples = get_historical_occupancy(
-        space_id,
-        weekday,
-        start,
-    )["samples"]
+    if service_id in SERVICE_BY_ID:
+        samples = get_service_historical_occupancy(
+            service_id,
+            weekday,
+            start,
+            aggregate=True,
+        )["samples"]
+    else:
+        samples = get_historical_occupancy(
+            service_id,
+            weekday,
+            start,
+        )["samples"]
     message = (
         f"A les {start} de {weekday_name} l'ocupació acostuma a ser "
         f"{LEVEL_CA[requested_level]}."
@@ -207,16 +225,84 @@ def advice(space_id: str, date_value: str, start: str) -> dict[str, Any]:
     }
 
 
+def advice_service(
+    service_id: str,
+    date_value: str,
+    start: str,
+) -> dict[str, Any]:
+    parsed_date, start_minutes = validate_date_time(date_value, start)
+    end_minutes = min(start_minutes + 120, 23 * 60 + 59)
+    end = f"{end_minutes // 60:02d}:{end_minutes % 60:02d}"
+    if end_minutes <= start_minutes:
+        raise ValueError("preferred_end must be later than preferred_start.")
+    recommendation = recommend_service(
+        service_id,
+        parsed_date.isoformat(),
+        start,
+        end,
+    )
+    requested = recommendation["requested_slot"]
+    score = requested["occupancy_score"]
+    if score is None or requested["occupancy_level"] == "unknown":
+        return {
+            "type": "info",
+            "message": UNKNOWN_MESSAGE,
+            "alternative": None,
+            "occupancy_score": None,
+            "service_id": service_id,
+            "unavailable_reason": recommendation.get(
+                "unavailable_reason",
+                "historical_data_unavailable",
+            ),
+        }
+
+    alternative = recommendation["recommended_slot"]
+    message = occupancy_message(
+        service_id,
+        parsed_date.weekday(),
+        requested,
+        alternative,
+    )
+    if requested["occupancy_level"] in ("high", "very_high"):
+        advice_type = "warning"
+    else:
+        advice_type = (
+            "recommendation"
+            if has_better_alternative(requested, alternative)
+            else "info"
+        )
+    return {
+        "type": advice_type,
+        "message": message,
+        "alternative": (
+            {
+                "start": alternative["start"],
+                "message": (
+                    f"Les {alternative['start']} acostumen a tenir "
+                    "menys ocupació."
+                ),
+            }
+            if has_better_alternative(requested, alternative)
+            else None
+        ),
+        "occupancy_score": score,
+        "service_id": service_id,
+    }
+
+
 def chat(message: str) -> dict[str, Any]:
     normalized = normalize_text(message)
-    space_id = detect_space_id(message)
-    if space_id is not None and not supports_safi_recommendations(space_id):
+    service_id = detect_service_id(message)
+    if (
+        service_id is not None
+        and not SERVICE_BY_ID[service_id].safi_recommendations
+    ):
         return {
             "message": "SAFi no ofereix recomanacions d'ocupació per aquest tipus d'espai.",
             "sources": [],
             "can_answer": False,
         }
-    if space_id is None or not any(
+    if service_id is None or not any(
         word in normalized
         for word in (
             "ocup",
@@ -257,6 +343,12 @@ def chat(message: str) -> dict[str, Any]:
         normalized,
     )
     source_weekday = date_reference.weekday()
+    if service_id != "fitness":
+        return {
+            "message": UNKNOWN_MESSAGE,
+            "sources": [],
+            "can_answer": False,
+        }
     if requested_time is not None:
         start = requested_time.group().zfill(5)
         try:
@@ -278,8 +370,8 @@ def chat(message: str) -> dict[str, Any]:
                 "sources": [],
                 "can_answer": False,
             }
-        recommendation = recommend(
-            space_id,
+        recommendation = recommend_service(
+            service_id,
             date_reference.isoformat(),
             start,
             end,
@@ -294,7 +386,7 @@ def chat(message: str) -> dict[str, Any]:
                 "can_answer": False,
             }
         response_message = occupancy_message(
-            space_id,
+            service_id,
             date_reference.weekday(),
             recommendation["requested_slot"],
             recommendation["recommended_slot"],
@@ -305,33 +397,35 @@ def chat(message: str) -> dict[str, Any]:
                 "sources": [],
                 "can_answer": False,
             }
-        asks_for_other_day = any(
-            phrase in normalized
-            for phrase in (
-                "altre dia",
-                "altre jorn",
-                "otro dia",
-                "another day",
-                "other day",
-            )
-        )
-        if asks_for_other_day:
-            day_alternative = get_best_day_alternative(
-                space_id,
-                date_reference.isoformat(),
-                recommendation["requested_slot"]["start"],
-            )
-            if day_alternative is not None:
-                response_message += (
-                    f" Un altre dia amb menys ocupació és el "
-                    f"{day_alternative['date']} a les "
-                    f"{day_alternative['start']}."
-                )
     else:
-        quietest = get_quietest_slot(
-            space_id,
-            date_reference.weekday() if has_explicit_day else None,
+        weekdays = (
+            [date_reference.weekday()]
+            if has_explicit_day
+            else list(range(7))
         )
+        quietest_by_day = [
+            (
+                weekday,
+                get_service_quietest_slot(
+                    service_id,
+                    weekday,
+                    aggregate=True,
+                )["slot"],
+            )
+            for weekday in weekdays
+        ]
+        quietest_by_day = [
+            item for item in quietest_by_day if item[1] is not None
+        ]
+        quietest_item = (
+            min(
+                quietest_by_day,
+                key=lambda item: item[1]["occupancy_score"],
+            )
+            if quietest_by_day
+            else None
+        )
+        quietest = quietest_item[1] if quietest_item else None
         if quietest is None:
             return {
                 "message": UNKNOWN_MESSAGE,
@@ -339,40 +433,18 @@ def chat(message: str) -> dict[str, Any]:
                 "can_answer": False,
             }
         quietest_start = quietest["start"]
-        weekday = quietest["weekday"]
+        weekday = quietest_item[0]
         source_weekday = weekday
         response_message = (
             f"Les {quietest_start} de {WEEKDAYS_CA[weekday]} acostumen "
             "a ser una de les franges amb menys ocupació."
         )
-        if any(
-            phrase in normalized
-            for phrase in (
-                "altre dia",
-                "altre jorn",
-                "otro dia",
-                "another day",
-                "other day",
-            )
-        ):
-            day_alternative = get_best_day_alternative(
-                space_id,
-                date_reference.isoformat(),
-                quietest_start,
-            )
-            if day_alternative is not None:
-                response_message += (
-                    f" Un altre dia amb menys ocupació és el "
-                    f"{day_alternative['date']} a les "
-                    f"{day_alternative['start']}."
-                )
-
     return {
         "message": response_message,
         "sources": [
             {
                 "type": "historical_occupancy",
-                "space_id": space_id,
+                "service_id": service_id,
                 "date_reference": WEEKDAYS_CA[source_weekday],
             }
         ],

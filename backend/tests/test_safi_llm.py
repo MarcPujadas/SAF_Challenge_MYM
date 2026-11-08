@@ -50,7 +50,7 @@ def test_safi_chat_llm_uses_forecast_tool_and_returns_grounded_source(
             ) as call_ornith,
             patch.object(
                 llm_service,
-                "get_historical_occupancy",
+                "get_service_historical_occupancy",
                 return_value={
                     "occupancy_score": 90,
                     "occupancy_level": "very_high",
@@ -60,8 +60,8 @@ def test_safi_chat_llm_uses_forecast_tool_and_returns_grounded_source(
             ),
             patch.object(
                 llm_service,
-                "get_best_alternative",
-                return_value=None,
+                "get_service_best_alternative",
+                return_value={"alternative": None},
             ),
         ):
             response = client.post(
@@ -79,7 +79,7 @@ def test_safi_chat_llm_uses_forecast_tool_and_returns_grounded_source(
         "sources": [
             {
                 "type": "historical_occupancy",
-                "space_id": "sala-fitnes-sala-cardio",
+                "service_id": "fitness",
             }
         ],
         "can_answer": True,
@@ -141,7 +141,7 @@ def test_safi_chat_llm_returns_unknown_when_historical_data_is_missing(
             ) as call_ornith,
             patch.object(
                 llm_service,
-                "get_historical_occupancy",
+                "get_service_historical_occupancy",
                 return_value={
                     "occupancy_score": None,
                     "occupancy_level": "unknown",
@@ -297,10 +297,19 @@ def test_ornith_adapter_uses_configured_key_and_chat_completion_protocol(
     assert kwargs["timeout"] == 30.0
 
 
-def test_forecast_tool_rejects_court_services_without_historical_lookup():
-    with patch.object(llm_service, "get_historical_occupancy") as historical:
+def test_forecast_tool_rejects_unvalidated_court_service():
+    with patch.object(
+        llm_service,
+        "get_service_historical_occupancy",
+        return_value={
+            "occupancy_score": None,
+            "occupancy_level": "unknown",
+            "samples": 0,
+            "unavailable_reason": "aggregated_forecast_not_validated",
+        },
+    ) as historical:
         result = llm_service.execute_tool(
-            "get_occupancy_forecast",
+            "get_service_occupancy_forecast",
             {
                 "service": "padel",
                 "date": "2026-11-10",
@@ -310,23 +319,37 @@ def test_forecast_tool_rejects_court_services_without_historical_lookup():
         )
 
     assert result["available"] is False
-    assert "not available" in result["reason"]
-    historical.assert_not_called()
+    historical.assert_called_once_with(
+        service_id="padel",
+        weekday=1,
+        start_time="18:30",
+        aggregate=True,
+    )
 
 
-def test_availability_tool_uses_shared_valid_slot_service():
+def test_availability_tool_uses_service_week_availability():
     with patch.object(
         llm_service,
-        "get_slot_availability",
+        "get_service_week_availability",
         return_value={
-            "start": "18:30",
-            "end": "19:45",
-            "available": True,
-            "remaining_capacity": 1,
+            "days": [
+                {
+                    "date": "2026-11-10",
+                    "slots": [
+                        {
+                            "start": "18:30",
+                            "end": "19:45",
+                            "available": True,
+                            "available_units": None,
+                            "remaining_people_capacity": 10,
+                        }
+                    ],
+                }
+            ]
         },
-    ) as get_slot:
+    ) as get_availability:
         result = llm_service.execute_tool(
-            "get_booking_availability",
+            "get_service_booking_availability",
             {
                 "service": "fitness",
                 "date": "2026-11-10",
@@ -336,10 +359,8 @@ def test_availability_tool_uses_shared_valid_slot_service():
         )
 
     assert result["available"] is True
-    get_slot.assert_called_once_with(
-        "sala-fitnes-sala-cardio",
+    get_availability.assert_called_once_with(
+        "fitness",
         llm_service.parse_date("2026-11-10"),
-        "18:30",
-        "19:45",
-        include_forecast=False,
+        llm_service.parse_date("2026-11-10"),
     )

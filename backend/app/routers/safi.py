@@ -9,14 +9,15 @@ from app.services.llm_service import (
     LLMUnavailableError,
     chat_with_ornith,
 )
-from app.services.safi_service import advice, chat
+from app.services.safi_service import advice, advice_service, chat
 
 
 router = APIRouter(prefix="/api/v1")
 
 
 class SAFiAdviceRequest(BaseModel):
-    space_id: str
+    space_id: str | None = None
+    service_id: str | None = None
     date: str
     start: str
 
@@ -28,8 +29,20 @@ class SAFiChatRequest(BaseModel):
 
 @router.post("/safi/advice")
 def get_safi_advice(payload: SAFiAdviceRequest) -> dict[str, Any]:
+    if (payload.space_id is None) == (payload.service_id is None):
+        raise ApiError(
+            "INVALID_FILTER",
+            "Provide either service_id or space_id.",
+        )
     try:
-        result = advice(payload.space_id, payload.date, payload.start)
+        if payload.service_id is not None:
+            result = advice_service(
+                payload.service_id,
+                payload.date,
+                payload.start,
+            )
+        else:
+            result = advice(payload.space_id, payload.date, payload.start)
     except ValueError as exc:
         raise ApiError("INVALID_TIME", str(exc)) from exc
     return success(result)

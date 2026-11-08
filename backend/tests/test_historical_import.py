@@ -427,27 +427,39 @@ def test_service_historical_functions_keep_resources_separate(
         lambda: historical.copy(),
     )
 
-    service_data = historical_service.prepare_service_data("fitness", 1)
+    service_data = historical_service.prepare_service_data(
+        "fitness",
+        1,
+        normalized=False,
+    )
     fitness_occupancy = historical_service.get_service_historical_occupancy(
         "fitness",
         1,
         "18:30",
+        aggregate=False,
     )
     heatmap = historical_service.get_service_historical_heatmap(
         "fitness",
         "2026-04-07",
         "2026-04-07",
+        aggregate=False,
     )
     alternative = historical_service.get_service_best_alternative(
         "fitness",
         1,
         "18:30",
+        aggregate=False,
     )
-    quietest = historical_service.get_service_quietest_slot("fitness", 1)
+    quietest = historical_service.get_service_quietest_slot(
+        "fitness",
+        1,
+        aggregate=False,
+    )
     court_occupancy = historical_service.get_service_historical_occupancy(
         "tennis",
         1,
         "18:30",
+        aggregate=False,
     )
 
     assert set(service_data["service_id"]) == {"fitness"}

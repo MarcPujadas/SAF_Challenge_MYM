@@ -54,39 +54,185 @@ def count_confirmed_reservations_for_slot(
 
 def create_reservation(
     user_id: str,
-    space_id: str,
+    space_id: str | None,
     date_value: str,
     start: str,
     end: str,
-) -> dict[str, str]:
+    *,
+    service_id: str | None = None,
+    participants_count: int | None = None,
+) -> dict[str, Any]:
     reservation_date = parse_date(date_value)
     start_minutes = time_to_minutes(start)
     end_minutes = time_to_minutes(end)
+    if participants_count is not None and participants_count <= 0:
+        raise ApiError(
+            "INVALID_PARTICIPANTS_COUNT",
+            "participants_count must be greater than zero.",
+        )
 
     with closing(get_connection()) as connection:
         with connection:
             connection.execute("BEGIN IMMEDIATE")
-            space = connection.execute(
-                """
-                SELECT id, type, capacity, reservable
-                FROM spaces
-                WHERE id = ?
-                """,
-                (space_id,),
-            ).fetchone()
-            if space is None or not bool(space["reservable"]):
+            service = None
+            if service_id is not None:
+                service = connection.execute(
+                    """
+                    SELECT id, name, reservable
+                    FROM services
+                    WHERE id = ?
+                    """,
+                    (service_id,),
+                ).fetchone()
+                if service is None:
+                    raise ApiError(
+                        "INVALID_SERVICE",
+                        "The requested service does not exist.",
+                        404,
+                    )
+                if not bool(service["reservable"]):
+                    raise ApiError(
+                        "INVALID_SERVICE",
+                        "The requested service is not reservable.",
+                    )
+                if space_id is not None:
+                    candidates = connection.execute(
+                        """
+                        SELECT
+                            spaces.id, spaces.name, spaces.type,
+                            spaces.capacity, spaces.reservable,
+                            link.capacity_mode,
+                            link.reservation_capacity,
+                            link.person_capacity,
+                            link.service_id
+                        FROM service_spaces AS link
+                        JOIN spaces ON spaces.id = link.space_id
+                        WHERE link.service_id = ?
+                            AND link.space_id = ?
+                            AND link.is_active = 1
+                        """,
+                        (service_id, space_id),
+                    ).fetchall()
+                    if not candidates:
+                        raise ApiError(
+                            "INVALID_SERVICE_SPACE",
+                            "The requested space does not belong to the service.",
+                        )
+                else:
+                    candidates = connection.execute(
+                        """
+                        SELECT
+                            spaces.id, spaces.name, spaces.type,
+                            spaces.capacity, spaces.reservable,
+                            link.capacity_mode,
+                            link.reservation_capacity,
+                            link.person_capacity,
+                            link.service_id
+                        FROM service_spaces AS link
+                        JOIN spaces ON spaces.id = link.space_id
+                        WHERE link.service_id = ?
+                            AND link.is_active = 1
+                            AND spaces.reservable = 1
+                        ORDER BY link.display_order, link.space_id
+                        """,
+                        (service_id,),
+                    ).fetchall()
+                    if not candidates:
+                        raise ApiError(
+                            "INVALID_SERVICE",
+                            "The requested service has no reservable spaces.",
+                        )
+            else:
+                if space_id is None:
+                    raise ApiError(
+                        "INVALID_SPACE",
+                        "space_id or service_id is required.",
+                    )
+                service = connection.execute(
+                    """
+                    SELECT services.id, services.name, services.reservable
+                    FROM services
+                    JOIN service_spaces
+                        ON service_spaces.service_id = services.id
+                    WHERE service_spaces.space_id = ?
+                        AND service_spaces.is_active = 1
+                    ORDER BY service_spaces.display_order, services.id
+                    LIMIT 1
+                    """,
+                    (space_id,),
+                ).fetchone()
+                if service is None:
+                    service = connection.execute(
+                        """
+                        SELECT id, name, reservable
+                        FROM services
+                        WHERE space_id = ?
+                        ORDER BY id
+                        LIMIT 1
+                        """,
+                        (space_id,),
+                    ).fetchone()
+                candidates = connection.execute(
+                    """
+                    SELECT
+                        spaces.id, spaces.name, spaces.type,
+                        spaces.capacity, spaces.reservable,
+                        link.capacity_mode,
+                        link.reservation_capacity,
+                        link.person_capacity,
+                        link.service_id
+                    FROM spaces
+                    LEFT JOIN service_spaces AS link
+                        ON link.space_id = spaces.id
+                        AND link.service_id = ?
+                        AND link.is_active = 1
+                    WHERE spaces.id = ?
+                    """,
+                    (service["id"] if service else None, space_id),
+                ).fetchall()
+            if space_id is not None and not candidates:
                 raise ApiError(
                     "INVALID_SPACE",
-                    "The requested space does not exist or is not reservable.",
-                    404 if space is None else 400,
+                    "The requested space does not exist.",
+                    404,
                 )
-            validate_reservation_slot(
-                space["id"],
-                space["type"],
-                reservation_date,
-                start,
-                end,
-            )
+            if space_id is not None:
+                candidate = candidates[0]
+                if not bool(candidate["reservable"]):
+                    raise ApiError(
+                        "INVALID_SPACE",
+                        "The requested space does not exist or is not reservable.",
+                    )
+                validate_reservation_slot(
+                    candidate["id"],
+                    candidate["type"],
+                    reservation_date,
+                    start,
+                    end,
+                )
+                slot_candidates = candidates
+            else:
+                slot_candidates = []
+                for candidate in candidates:
+                    try:
+                        validate_reservation_slot(
+                            candidate["id"],
+                            candidate["type"],
+                            reservation_date,
+                            start,
+                            end,
+                        )
+                    except ApiError as exc:
+                        if exc.code != "INVALID_TIME":
+                            raise
+                        continue
+                    slot_candidates.append(candidate)
+                if not slot_candidates:
+                    raise ApiError(
+                        "INVALID_TIME",
+                        "The requested time does not match a valid service slot.",
+                    )
+
             user = connection.execute(
                 "SELECT id FROM users WHERE id = ?",
                 (user_id,),
@@ -121,14 +267,59 @@ def create_reservation(
                     409,
                 )
 
-            concurrent = count_confirmed_reservations_for_slot(
-                space_id,
-                reservation_date.isoformat(),
-                start_minutes,
-                end_minutes,
-                connection=connection,
-            )
-            if concurrent >= int(space["capacity"]):
+            assigned_space = None
+            for candidate in slot_candidates:
+                if not bool(candidate["reservable"]):
+                    continue
+
+                reservations = connection.execute(
+                    """
+                    SELECT start, end, participants_count
+                    FROM reservations
+                    WHERE space_id = ?
+                        AND date = ?
+                        AND status = 'confirmed'
+                    """,
+                    (candidate["id"], reservation_date.isoformat()),
+                ).fetchall()
+                overlapping = [
+                    row
+                    for row in reservations
+                    if overlaps(
+                        start_minutes,
+                        end_minutes,
+                        time_to_minutes(row["start"]),
+                        time_to_minutes(row["end"]),
+                    )
+                ]
+                is_unit_capacity = (
+                    candidate["capacity_mode"] == "resource_units"
+                )
+                capacity = int(
+                    candidate["reservation_capacity"]
+                    if is_unit_capacity
+                    and candidate["reservation_capacity"] is not None
+                    else candidate["person_capacity"]
+                    if not is_unit_capacity
+                    and candidate["person_capacity"] is not None
+                    else candidate["capacity"]
+                )
+                occupied = (
+                    len(overlapping)
+                    if is_unit_capacity
+                    else sum(
+                        int(row["participants_count"] or 1)
+                        for row in overlapping
+                    )
+                )
+                requested_capacity = (
+                    1 if is_unit_capacity else participants_count or 1
+                )
+                if occupied + requested_capacity <= capacity:
+                    assigned_space = candidate
+                    break
+
+            if assigned_space is None:
                 raise ApiError(
                     "SLOT_NOT_AVAILABLE",
                     "The requested time slot has no remaining capacity.",
@@ -139,14 +330,17 @@ def create_reservation(
             connection.execute(
                 """
                 INSERT INTO reservations (
-                    id, user_id, space_id, date, start, end, status
+                    id, user_id, space_id, service_id, participants_count,
+                    date, start, end, status
                 )
-                VALUES (?, ?, ?, ?, ?, ?, 'confirmed')
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmed')
                 """,
                 (
                     reservation_id,
                     user_id,
-                    space_id,
+                    assigned_space["id"],
+                    service["id"] if service else None,
+                    participants_count,
                     reservation_date.isoformat(),
                     start,
                     end,
@@ -157,7 +351,10 @@ def create_reservation(
         "reservation_id": reservation_id,
         "status": "confirmed",
         "user_id": user_id,
-        "space_id": space_id,
+        "service_id": service["id"] if service else None,
+        "space_id": assigned_space["id"],
+        "space_name": assigned_space["name"],
+        "participants_count": participants_count,
         "date": reservation_date.isoformat(),
         "start": start,
         "end": end,
@@ -198,6 +395,7 @@ def get_user_reservation_context(
     date_from: str | None = None,
     date_to: str | None = None,
     space_id: str | None = None,
+    service_id: str | None = None,
 ) -> dict[str, Any]:
     date_from, date_to = parse_date_range(
         date_from if date_from is not None else date.today().isoformat(),
@@ -218,6 +416,9 @@ def get_user_reservation_context(
     if space_id is not None:
         conditions.append("r.space_id = ?")
         params.append(space_id)
+    if service_id is not None:
+        conditions.append("r.service_id = ?")
+        params.append(service_id)
 
     with closing(get_connection()) as connection:
         user = connection.execute(
@@ -244,7 +445,7 @@ def get_user_reservation_context(
                 r.status
             FROM reservations r
             JOIN spaces s ON s.id = r.space_id
-            LEFT JOIN services sv ON sv.space_id = r.space_id
+            LEFT JOIN services sv ON sv.id = r.service_id
             WHERE {" AND ".join(conditions)}
             ORDER BY r.date, r.start, r.id
             """,

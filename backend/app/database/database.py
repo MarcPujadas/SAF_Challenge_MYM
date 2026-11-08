@@ -147,6 +147,10 @@ def init_db() -> None:
                 id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
                 space_id TEXT NOT NULL,
+                service_id TEXT,
+                participants_count INTEGER CHECK (
+                    participants_count IS NULL OR participants_count > 0
+                ),
                 date TEXT NOT NULL,
                 start TEXT NOT NULL,
                 end TEXT NOT NULL,
@@ -159,7 +163,8 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS recommendations (
                 id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
-                space_id TEXT NOT NULL,
+                space_id TEXT,
+                service_id TEXT,
                 date TEXT NOT NULL,
                 requested_start TEXT NOT NULL,
                 recommended_start TEXT,
@@ -201,6 +206,79 @@ def init_db() -> None:
             """
         )
 
+        reservation_columns = {
+            row["name"]
+            for row in connection.execute(
+                "PRAGMA table_info(reservations)"
+            ).fetchall()
+        }
+        if "service_id" not in reservation_columns:
+            connection.execute(
+                "ALTER TABLE reservations ADD COLUMN service_id TEXT"
+            )
+        if "participants_count" not in reservation_columns:
+            connection.execute(
+                "ALTER TABLE reservations ADD COLUMN participants_count "
+                "INTEGER CHECK (participants_count IS NULL OR "
+                "participants_count > 0)"
+            )
+
+        recommendation_columns = {
+            row["name"]
+            for row in connection.execute(
+                "PRAGMA table_info(recommendations)"
+            ).fetchall()
+        }
+        if "service_id" not in recommendation_columns:
+            connection.execute(
+                "ALTER TABLE recommendations ADD COLUMN service_id TEXT"
+            )
+        recommendation_space = next(
+            row
+            for row in connection.execute(
+                "PRAGMA table_info(recommendations)"
+            ).fetchall()
+            if row["name"] == "space_id"
+        )
+        if recommendation_space["notnull"]:
+            connection.execute("PRAGMA foreign_keys = OFF")
+            connection.executescript(
+                """
+                CREATE TABLE recommendations_rebuilt (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    space_id TEXT,
+                    service_id TEXT,
+                    date TEXT NOT NULL,
+                    requested_start TEXT NOT NULL,
+                    recommended_start TEXT,
+                    requested_score INTEGER,
+                    recommended_score INTEGER,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id),
+                    FOREIGN KEY (space_id) REFERENCES spaces(id)
+                );
+                INSERT INTO recommendations_rebuilt (
+                    id, user_id, space_id, service_id, date,
+                    requested_start, recommended_start, requested_score,
+                    recommended_score, created_at
+                )
+                SELECT
+                    id, user_id, space_id, service_id, date,
+                    requested_start, recommended_start, requested_score,
+                    recommended_score, created_at
+                FROM recommendations;
+                DROP TABLE recommendations;
+                ALTER TABLE recommendations_rebuilt
+                    RENAME TO recommendations;
+                CREATE INDEX IF NOT EXISTS idx_recommendations_user
+                    ON recommendations(user_id);
+                CREATE INDEX IF NOT EXISTS idx_recommendations_space_date
+                    ON recommendations(space_id, date);
+                """
+            )
+            connection.execute("PRAGMA foreign_keys = ON")
+
         connection.execute(
             "INSERT OR IGNORE INTO users (id, name) VALUES (?, ?)",
             ("demo-user", "Usuari Demo"),
@@ -241,3 +319,31 @@ def init_db() -> None:
             """
         )
         seed_service_spaces(connection)
+        connection.execute(
+            """
+            UPDATE reservations
+            SET service_id = (
+                SELECT service_id
+                FROM service_spaces
+                WHERE service_spaces.space_id = reservations.space_id
+                    AND service_spaces.is_active = 1
+                ORDER BY display_order, service_id
+                LIMIT 1
+            )
+            WHERE service_id IS NULL
+            """
+        )
+        connection.execute(
+            """
+            UPDATE recommendations
+            SET service_id = (
+                SELECT service_id
+                FROM service_spaces
+                WHERE service_spaces.space_id = recommendations.space_id
+                    AND service_spaces.is_active = 1
+                ORDER BY display_order, service_id
+                LIMIT 1
+            )
+            WHERE service_id IS NULL
+            """
+        )

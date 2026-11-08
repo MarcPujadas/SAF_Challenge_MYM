@@ -93,7 +93,7 @@ def get_service_resources(
             "service_id": row["service_id"],
             "space_id": row["space_id"],
             "resource_label": row["resource_label"],
-            "space_name": row["space_name"],
+            "space_name": row["space_name"] or row["resource_label"],
             "space_type": row["space_type"],
             "person_capacity": row["person_capacity"],
             "reservation_capacity": row["reservation_capacity"],
@@ -761,16 +761,49 @@ def list_services() -> list[dict]:
                 services.description,
                 services.space_id,
                 CASE
-                    WHEN services.reservable = 1
-                        AND spaces.reservable = 1
+                    WHEN services.reservable = 1 AND (
+                        MAX(
+                            CASE
+                                WHEN service_spaces.is_active = 1
+                                    AND resource_spaces.reservable = 1
+                                THEN 1
+                                ELSE 0
+                            END
+                        ) = 1
+                        OR COUNT(
+                            CASE WHEN service_spaces.is_active = 1 THEN 1 END
+                        ) = 0 AND spaces.reservable = 1
+                    )
                     THEN 1
                     ELSE 0
-                END AS reservable
+                END AS reservable,
+                COUNT(
+                    CASE WHEN service_spaces.is_active = 1 THEN 1 END
+                ) AS resource_count,
+                MIN(
+                    CASE WHEN service_spaces.is_active = 1
+                        THEN service_spaces.capacity_mode END
+                ) AS min_capacity_mode,
+                MAX(
+                    CASE WHEN service_spaces.is_active = 1
+                        THEN service_spaces.capacity_mode END
+                ) AS max_capacity_mode
             FROM services
             LEFT JOIN spaces ON spaces.id = services.space_id
+            LEFT JOIN service_spaces
+                ON service_spaces.service_id = services.id
+            LEFT JOIN spaces AS resource_spaces
+                ON resource_spaces.id = service_spaces.space_id
+            GROUP BY
+                services.id, services.name, services.description,
+                services.space_id, services.reservable, spaces.reservable
             ORDER BY services.name
             """
         ).fetchall()
+    configured_modes = {
+        mapping.service_id: mapping.capacity_mode
+        for mapping in SERVICE_SPACE_MAPPINGS
+    }
     return [
         {
             "id": row["id"],
@@ -778,6 +811,20 @@ def list_services() -> list[dict]:
             "description": row["description"],
             "space_id": row["space_id"],
             "reservable": bool(row["reservable"]),
+            "resource_count": row["resource_count"],
+            "capacity_mode": (
+                "unit"
+                if row["min_capacity_mode"] == "resource_units"
+                and row["max_capacity_mode"] == "resource_units"
+                else "people"
+                if row["min_capacity_mode"] == "people"
+                and row["max_capacity_mode"] == "people"
+                else (
+                    "unit"
+                    if configured_modes.get(row["id"]) == "resource_units"
+                    else "people"
+                )
+            ),
         }
         for row in rows
     ]

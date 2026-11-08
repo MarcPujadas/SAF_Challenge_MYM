@@ -12,12 +12,14 @@ VALID_ACTIONS = {
 
 def save_recommendation(
     user_id: str,
-    space_id: str,
+    space_id: str | None,
     date: str,
     requested_start: str,
     recommended_start: str | None,
     requested_score: int | None,
     recommended_score: int | None,
+    *,
+    service_id: str | None = None,
 ) -> str:
     recommendation_id = (
         f"rec_{uuid4().hex[:12]}"
@@ -41,20 +43,46 @@ def save_recommendation(
                 404,
             )
 
-        space = connection.execute(
-            """
-            SELECT id
-            FROM spaces
-            WHERE id = ?
-            """,
-            (space_id,),
-        ).fetchone()
-
-        if space is None:
+        if service_id is not None:
+            service = connection.execute(
+                "SELECT id FROM services WHERE id = ?",
+                (service_id,),
+            ).fetchone()
+            if service is None:
+                raise ApiError(
+                    "INVALID_SERVICE",
+                    "The requested service does not exist.",
+                    404,
+                )
+        if space_id is not None:
+            space = connection.execute(
+                "SELECT id FROM spaces WHERE id = ?",
+                (space_id,),
+            ).fetchone()
+            if space is None:
+                raise ApiError(
+                    "INVALID_SPACE",
+                    "The requested space does not exist.",
+                    404,
+                )
+            if service_id is not None:
+                belongs = connection.execute(
+                    """
+                    SELECT 1
+                    FROM service_spaces
+                    WHERE service_id = ? AND space_id = ? AND is_active = 1
+                    """,
+                    (service_id, space_id),
+                ).fetchone()
+                if belongs is None:
+                    raise ApiError(
+                        "INVALID_SERVICE_SPACE",
+                        "The requested space does not belong to the service.",
+                    )
+        if service_id is None and space_id is None:
             raise ApiError(
-                "INVALID_SPACE",
-                "The requested space does not exist.",
-                404,
+                "INVALID_RECOMMENDATION",
+                "A service_id or space_id is required.",
             )
 
         connection.execute(
@@ -63,18 +91,20 @@ def save_recommendation(
                 id,
                 user_id,
                 space_id,
+                service_id,
                 date,
                 requested_start,
                 recommended_start,
                 requested_score,
                 recommended_score
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 recommendation_id,
                 user_id,
                 space_id,
+                service_id,
                 date,
                 requested_start,
                 recommended_start,

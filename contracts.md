@@ -90,13 +90,11 @@ Exemple:
 
 `sala-fitnes-sala-cardio` identifica l'espai real utilitzat pel backend.
 
-Per consultar disponibilitat, crear reserves o demanar recomanacions s'ha d'utilitzar sempre:
+Les peticions antigues poden continuar utilitzant `space_id`. Les
+operacions agregades noves utilitzen `service_id`; quan hi ha una reserva
+concreta, el backend conserva també el `space_id` del subespai assignat.
 
-```text
-service.space_id
-```
-
-No hardcodejar `fitness` com a identificador d'espai.
+No s'ha d'utilitzar `service.space_id` per agregar un servei.
 
 ---
 
@@ -132,8 +130,10 @@ Retorna els serveis que es mostren a l'aplicació.
 La resposta inclou els vuit serveis configurats pel backend:
 `fitness`, `pool-25m`, `pool-16m`, `padel`, `tennis`, `squash`,
 `football` i `guided-activities`. Cada servei té un `id` únic i un
-`space_id` que identifica un espai existent. `reservable` és `true`
-només quan el servei i l'espai associat són reservables.
+`space_id` representatiu per compatibilitat. `reservable` és `true`
+només quan el servei té recursos reservables. La resposta afegeix
+`resource_count` i `capacity_mode` (`unit` o `people`) dels recursos
+actius.
 
 ### Response
 
@@ -146,7 +146,9 @@ només quan el servei i l'espai associat són reservables.
       "name": "Fitness",
       "description": "Sala de fitness i cardio",
       "space_id": "sala-fitnes-sala-cardio",
-      "reservable": true
+      "reservable": true,
+      "resource_count": 1,
+      "capacity_mode": "people"
     },
     {
       "id": "pool-25m",
@@ -203,6 +205,32 @@ només quan el servei i l'espai associat són reservables.
 ```
 
 ---
+
+## GET /services/{service_id}/spaces
+
+Retorna els subespais actius i les seves capacitats configurades. Els
+recursos virtuals sense espai físic reservable no es presenten com a
+reservables.
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "service_id": "tennis",
+      "space_id": "tennis-tennis-1",
+      "resource_label": "Pista 1",
+      "person_capacity": null,
+      "reservation_capacity": 1,
+      "capacity_mode": "resource_units",
+      "is_active": true,
+      "is_virtual": false,
+      "reservable": true
+    }
+  ],
+  "error": null
+}
+```
 
 # 5. Disponibilitat
 
@@ -345,6 +373,56 @@ INVALID_SPACE
 
 ---
 
+## GET /services/{service_id}/availability/week
+
+Calcula disponibilitat actual des de SQLite, les reserves confirmades i
+les capacitats dels subespais associats; no consulta l'històric.
+
+### Query parameters
+
+```text
+from=2026-11-09
+to=2026-11-15
+```
+
+La resposta inclou `capacity_mode`. Per a `unit`, cada slot inclou
+`available_units` i `total_units`; per a `people`, aquests dos camps són
+`null` i s'inclou `remaining_people_capacity`. `spaces` detalla la
+disponibilitat dels subespais que admeten el slot.
+
+```json
+{
+  "success": true,
+  "data": {
+    "service_id": "tennis",
+    "from": "2026-11-10",
+    "to": "2026-11-10",
+    "capacity_mode": "unit",
+    "days": [
+      {
+        "date": "2026-11-10",
+        "slots": [
+          {
+            "start": "18:30",
+            "end": "19:45",
+            "available": true,
+            "capacity_mode": "unit",
+            "available_units": 3,
+            "total_units": 5,
+            "remaining_people_capacity": null,
+            "spaces": [
+              {"space_id": "tennis-tennis-1", "available": false},
+              {"space_id": "tennis-tennis-2", "available": true}
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "error": null
+}
+```
+
 # 6. Heatmap d'ocupació
 
 ## GET /availability/heatmap
@@ -358,6 +436,13 @@ space_id=sala-fitnes-sala-cardio
 from=2026-04-01
 to=2026-04-30
 ```
+
+Es pot enviar `service_id` en lloc de `space_id`, però no tots dos alhora.
+El heatmap per servei només agrega serveis amb forecast validat; els altres
+retornen `occupancy_score: null`, `occupancy_level: "unknown"` i
+`unavailable_reason: "aggregated_forecast_not_validated"`. No s'utilitza
+cap subespai com a proxy. Les respostes de servei també inclouen
+`occupancy_ratio` quan existeix, `samples` i la font històrica.
 
 Els filtres permeten limitar les dades per espai i període. `from` i
 `to` són inclusius; si s'omet un dels dos, es consulta només la data
@@ -393,6 +478,35 @@ combina els espais amb mostres disponibles per a aquell dia de la setmana.
             "hour": "18:30",
             "occupancy_score": 91,
             "occupancy_level": "very_high"
+          }
+        ]
+      }
+    ]
+  },
+  "error": null
+}
+```
+
+### Heatmap per servei
+
+```json
+{
+  "success": true,
+  "data": {
+    "service_id": "fitness",
+    "aggregate": true,
+    "source": "historical_usage",
+    "occupancy_ratio_available": true,
+    "days": [
+      {
+        "date": "2026-04-07",
+        "slots": [
+          {
+            "hour": "18:30",
+            "occupancy_score": 60,
+            "occupancy_level": "medium",
+            "occupancy_ratio": 0.6,
+            "samples": 2
           }
         ]
       }
@@ -452,7 +566,8 @@ INVALID_DATE_RANGE
 
 Demana al backend una recomanació de franja basada en l'ocupació històrica.
 
-La recomanació queda registrada al backend perquè posteriorment es pugui saber si l'usuari l'ha acceptat o ignorat.
+La recomanació queda registrada al backend perquè posteriorment es pugui saber si l'usuari l'ha acceptat o ignorat. El payload antic amb `space_id`
+es manté; el payload agregat pot enviar `service_id` en lloc de `space_id`.
 
 Els espais amb `spaces.type == "court"` (pàdel, tennis, esquaix, futbol i altres pistes equivalents) no reben recomanacions SAFi d'ocupació. En aquests casos l'endpoint respon HTTP 200 amb:
 
@@ -474,6 +589,21 @@ demo-user
 ```
 
 ### Request
+
+```json
+{
+  "service_id": "fitness",
+  "date": "2026-11-10",
+  "preferred_start": "18:30",
+  "preferred_end": "19:45"
+}
+```
+
+Les pistes i els serveis sense forecast agregat validat retornen score
+`null`, nivell `unknown`, `recommendation_available: false` i no desen
+cap recomanació.
+
+### Payload antic per espai
 
 ```json
 {
@@ -504,7 +634,7 @@ demo-user
     "message": "Les 19:45 acostumen a tenir menys ocupació que les 18:30.",
     "confidence": "medium",
     "basis": {
-      "space_id": "sala-fitnes-sala-cardio",
+      "service_id": "fitness",
       "weekday": "Tuesday",
       "historical_period": "2026-04-01 to 2026-10-31"
     }
@@ -601,9 +731,26 @@ RECOMMENDATION_NOT_FOUND
 
 ## POST /reservations
 
-Crea una reserva real i la guarda a SQLite.
+Crea una reserva real i la guarda a SQLite. El payload antic basat en
+`space_id` continua suportat. Amb `service_id` i `space_id: null`, el
+backend assigna el primer subespai disponible amb ordre estable. Si
+s'envien tots dos, valida que el subespai pertanyi al servei.
 
 ### Request
+
+```json
+{
+  "user_id": "demo-user",
+  "service_id": "tennis",
+  "space_id": null,
+  "participants_count": null,
+  "date": "2026-11-10",
+  "start": "18:30",
+  "end": "19:45"
+}
+```
+
+### Payload antic per espai
 
 ```json
 {
@@ -624,7 +771,10 @@ Crea una reserva real i la guarda a SQLite.
     "reservation_id": "res_12345",
     "status": "confirmed",
     "user_id": "demo-user",
-    "space_id": "sala-fitnes-sala-cardio",
+    "service_id": "tennis",
+    "space_id": "tennis-tennis-1",
+    "space_name": "Pista 1",
+    "participants_count": null,
     "date": "2026-11-10",
     "start": "19:45",
     "end": "21:00"
@@ -723,6 +873,21 @@ No necessita utilitzar un LLM.
 
 ```json
 {
+  "service_id": "fitness",
+  "date": "2026-11-10",
+  "start": "18:30"
+}
+```
+
+També s'accepta el payload antic amb `space_id`. No es poden enviar tots
+dos identificadors alhora. Els serveis sense forecast validat retornen
+`occupancy_score: null` i una resposta equivalent a «No ho sé amb les
+dades disponibles».
+
+### Payload antic per espai
+
+```json
+{
   "space_id": "sala-fitnes-sala-cardio",
   "date": "2026-11-10",
   "start": "18:30"
@@ -803,7 +968,7 @@ warning
     "sources": [
       {
         "type": "historical_occupancy",
-        "space_id": "sala-fitnes-sala-cardio",
+        "service_id": "fitness",
         "date_reference": "dimarts"
       }
     ],
@@ -835,6 +1000,11 @@ Utilitza Ornith per redactar una resposta a partir de tools internes del backend
 Les tools només poden consultar previsió històrica, disponibilitat actual o
 reserves confirmades de l'usuari indicat al request. L'identificador d'usuari
 no es rep mai del model. Aquest endpoint no crea ni cancel·la reserves.
+Les tools consulten per `service_id` mitjançant
+`get_service_occupancy_forecast`, `get_service_booking_availability` i
+`get_user_reservations`; no resolen el servei a un `services.space_id`
+representatiu. La previsió només usa `historical_usage`; la disponibilitat
+només usa SQLite i reserves confirmades.
 
 ### Request
 
@@ -1231,6 +1401,9 @@ mitjana només inclou accions `accepted` amb franges diferents i scores vàlids
 compta aquestes reduccions amb score demanat de 65 o més. Sense cap reducció
 vàlida, `average_saturation_reduction` és `null`. Les accions emmagatzemen
 l'estat actual, no un historial de canvis d'acció.
+Els filtres `space_id` i `service_id` són opcionals. Si s'envia
+`service_id`, el resultat s'agrupa per servei i es retorna a `services`;
+sense aquest filtre es manté el resultat existent a `spaces`.
 
 ```json
 {
@@ -1268,6 +1441,7 @@ Permet mesurar l'impacte real de les recomanacions i fins a quin punt els usuari
 
 ```text
 space_id=sala-fitnes-sala-cardio
+service_id=fitness
 from=2026-11-01
 to=2026-11-30
 ```
@@ -1285,6 +1459,7 @@ Es poden combinar els filtres.
       "to": "2026-11-30"
     },
     "space_id": "sala-fitnes-sala-cardio",
+    "service_id": "fitness",
     "total_recommendations": 120,
     "accepted": 73,
     "ignored": 31,
@@ -1470,7 +1645,7 @@ No s'han d'intercanviar automàticament les dates.
 3. Totes les dates utilitzen `YYYY-MM-DD`.
 4. Totes les hores utilitzen format `HH:MM` de 24 hores.
 5. Els identificadors són strings.
-6. `service.id` i `service.space_id` són conceptes diferents.
+6. `service.id` i `service.id` són conceptes diferents.
 7. Les APIs de disponibilitat, recomanació i reserva utilitzen `space_id`.
 8. `occupancy_score` va de 0 a 100.
 9. Si una dada no existeix, utilitzar `null`, `[]` o `unknown` segons el contracte.
