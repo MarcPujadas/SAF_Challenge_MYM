@@ -6,7 +6,7 @@ import {
   fetchAdminReservations, 
   fetchServices 
 } from '../services/api';
-import { Activity, Calendar, Clock, TrendingUp, ShieldCheck, Users } from 'lucide-react';
+import { Activity, Calendar, Clock, TrendingUp, ShieldCheck } from 'lucide-react';
 
 export default function AdminDashboard() {
   const [summary, setSummary] = useState<any>(null);

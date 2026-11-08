@@ -1,142 +1,31 @@
-// src/services/api.ts
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-
-export interface Service {
-  id: string;
-  name: string;
-  space_id: string;
-  description?: string;
+const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
+type Envelope<T> = { success: boolean; data: T | null; error: { code: string; message: string } | null };
+export type Service = { id: string; name: string; description?: string; space_id?: string; reservable: boolean };
+export type Slot = { start: string; end: string; available: boolean; available_units: number | null; remaining_people_capacity: number | null };
+export type ServiceDay = { date: string; slots: Slot[] };
+export type ServiceWeek = { service_id: string; days: ServiceDay[] };
+export type Recommendation = { recommendation_id: string | null; message: string; recommended_slot: { start: string; occupancy_score: number | null } | null; recommendation_available?: boolean };
+export type Reservation = { reservation_id: string; service_id: string | null; space_id: string; date: string; start: string; end: string; status: string };
+async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch(API_BASE_URL + '/api/v1' + path, { ...init, signal: controller.signal, headers: { 'Content-Type': 'application/json', ...init?.headers } });
+    const body = await response.json() as Envelope<T>;
+    if (!response.ok || !body.success || body.data === null) throw new Error(body.error?.message || 'Error de comunicació amb SAFi');
+    return body.data;
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') throw new Error('El backend no respon (12 s). Comprova iniciar_web.bat.');
+    throw err;
+  } finally { clearTimeout(timeout); }
 }
-
-export interface Reservation {
-  id?: string;
-  space_id: string;
-  user_id: string;
-  date: string;
-  start_time: string;
-  end_time: string;
-  status?: string;
-}
-
-export interface RecommendationRequest {
-  user_id: string;
-  basis: {
-    space_id: string;
-    weekday: string;
-    historical_period?: string;
-  };
-  requested_start: string;
-}
-
-export interface RecommendationResponse {
-  recommendation_id: string;
-  recommended_start: string;
-  reason: string;
-  occupancy_score: number;
-  occupancy_level: string;
-}
-
-// Funció auxiliar robusta per gestionar respostes del backend
-async function handleResponse(res: Response) {
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.detail || errorData.error || 'Error en la petició a l’API');
-  }
-  return await res.json();
-}
-
-// 1. Serveis
-export async function getServices(): Promise<Service[]> {
-  const res = await fetch(`${API_BASE_URL}/api/v1/services`);
-  return handleResponse(res);
-}
-
-// 2. Disponibilitat
-export async function getAvailability(spaceId: string, date: string) {
-  const res = await fetch(`${API_BASE_URL}/api/v1/availability?space_id=${spaceId}&date=${date}`);
-  return handleResponse(res);
-}
-
-// 3. Recomanacions SAFi
-export async function getRecommendation(data: RecommendationRequest): Promise<RecommendationResponse> {
-  const res = await fetch(`${API_BASE_URL}/api/v1/recommendations`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-  return handleResponse(res);
-}
-
-// 4. Registrar acció de recomanació
-export async function sendRecommendationAction(recommendationId: string, action: 'accepted' | 'ignored') {
-  const res = await fetch(`${API_BASE_URL}/api/v1/recommendations/${recommendationId}/action`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action }),
-  });
-  return handleResponse(res);
-}
-
-// 5. Crear Reserva
-export async function createReservation(reservation: Reservation) {
-  const res = await fetch(`${API_BASE_URL}/api/v1/reservations`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(reservation),
-  });
-  return handleResponse(res);
-}
-
-// 6. Heatmap d'ocupació
-export async function getHeatmap(spaceId: string, from: string, to: string) {
-  const res = await fetch(`${API_BASE_URL}/api/v1/availability/heatmap?space_id=${spaceId}&from=${from}&to=${to}`);
-  return handleResponse(res);
-}
-
-// --- ADMIN APIs ---
-
-export async function getAdminSummary() {
-  const res = await fetch(`${API_BASE_URL}/api/v1/admin/summary`);
-  return handleResponse(res);
-}
-
-export async function getAdminStats() {
-  const res = await fetch(`${API_BASE_URL}/api/v1/admin/stats`);
-  return handleResponse(res);
-}
-
-export async function getAdminReservations() {
-  const res = await fetch(`${API_BASE_URL}/api/v1/admin/reservations`);
-  return handleResponse(res);
-}
-
-export async function getAdminOccupancy(spaceId?: string, from?: string, to?: string) {
-  let url = `${API_BASE_URL}/api/v1/admin/occupancy`;
-  const params = new URLSearchParams();
-  if (spaceId) params.append('space_id', spaceId);
-  if (from) params.append('from', from);
-  if (to) params.append('to', to);
-  if (params.toString()) url += `?${params.toString()}`;
-
-  const res = await fetch(url);
-  return handleResponse(res);
-}
-
-export async function fetchAdminRecommendationsStats(spaceId?: string, from?: string, to?: string) {
-  let url = `${API_BASE_URL}/api/v1/admin/recommendations/stats`;
-  const params = new URLSearchParams();
-  if (spaceId) params.append('space_id', spaceId);
-  if (from) params.append('from', from);
-  if (to) params.append('to', to);
-  if (params.toString()) url += `?${params.toString()}`;
-
-  const res = await fetch(url);
-  return handleResponse(res);
-}
-
-// --- ÀLIES DE COMPATIBILITAT ---
-export const fetchAdminReservations = getAdminReservations;
-export const fetchAdminSummary = getAdminSummary;
-export const fetchAdminStats = getAdminStats;
+export const getServices = () => api<Service[]>('/services');
 export const fetchServices = getServices;
+export const getServiceAvailabilityWeek = (id: string, date: string) => api<ServiceWeek>('/services/' + encodeURIComponent(id) + '/availability/week?from=' + date + '&to=' + date);
+export const getRecommendation = (body: {service_id: string; date: string; preferred_start: string; preferred_end: string}) => api<Recommendation>('/recommendations', {method:'POST',body:JSON.stringify(body)});
+export const sendRecommendationAction = (id:string, action:'accepted'|'ignored') => api<unknown>('/recommendations/'+encodeURIComponent(id)+'/action',{method:'POST',body:JSON.stringify({action})});
+export const createReservation = (body:{user_id:string;service_id:string;date:string;start:string;end:string}) => api<Reservation>('/reservations',{method:'POST',body:JSON.stringify(body)});
+export const fetchAdminSummary = () => api<any>('/admin/summary');
+export const fetchAdminStats = () => api<any>('/admin/stats');
+export const fetchAdminReservations = () => api<any>('/admin/reservations');
+export const fetchAdminRecommendationsStats = (spaceId?:string) => api<any>('/admin/recommendations/stats' + (spaceId?'?space_id='+encodeURIComponent(spaceId):''));

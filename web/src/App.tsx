@@ -1,5 +1,5 @@
 // web/src/App.tsx
-import React, { useState } from 'react';
+import { useState } from 'react';
 import AdminDashboard from './pages/AdminDashboard';
 import Reserva from './pages/Reserva';
 

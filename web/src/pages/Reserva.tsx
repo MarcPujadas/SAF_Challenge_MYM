@@ -1,300 +1,44 @@
-import React, { useEffect, useState } from 'react';
-import { getServices, getAvailability, getRecommendation, sendRecommendationAction, createReservation } from '../services/api';
-import type { Service } from '../services/api';
-
-export default function Reserva() {
-  const [services, setServices] = useState<Service[]>([]);
-  const [selectedParentCategory, setSelectedParentCategory] = useState<string | null>(null);
-  const [selectedService, setSelectedService] = useState<Service | null>(null);
-  const [date, setDate] = useState<string>('');
-  const [slots, setSlots] = useState<any[]>([]);
-  const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
-  
-  // Per a la recomanació de SAFi
-  const [recommendation, setRecommendation] = useState<any>(null);
-  const [loadingRec, setLoadingRec] = useState<boolean>(false);
-  
-  // Missatges d'estat
-  const [message, setMessage] = useState<string>('');
-  const [error, setError] = useState<string>('');
-
-  // Carregar serveis en iniciar
-  useEffect(() => {
-    getServices()
-      .then((data) => {
-        if (Array.isArray(data)) {
-          setServices(data);
-        } else if (data && Array.isArray((data as any).services)) {
-          setServices((data as any).services);
-        } else {
-          setServices([]);
-        }
-      })
-      .catch((err) => {
-        console.error("Error carregant serveis:", err);
-        setError('Error al carregar els serveis del backend');
-      });
-  }, []);
-
-  // Helper per agrupar la llista plana en categories d'Espais Pares
-  const getParentCategory = (name: string) => {
-    if (name.includes('Poliesportiu')) return 'Poliesportiu';
-    if (name.includes('Piscina 25m')) return 'Piscina 25 metres';
-    if (name.includes('Pàdel')) return 'Pistes de pàdel';
-    if (name.includes('Futbol 7')) return 'Futbol 7';
-    if (name.includes('Activitats dirigides')) return 'Sales activitats dirigides';
-    if (name.includes('Tennis')) return 'Tennis';
-    return name.split(' - ')[0]; // Retorna l'espai pare per defecte
-  };
-
-  const safeServices = Array.isArray(services) ? services : [];
-  
-  // Llista d'espais pares únics
-  const parentCategories = Array.from(new Set(safeServices.map((s) => getParentCategory(s.name))));
-
-  // Subespais/pistes de la categoria seleccionada
-  const filteredSubspaces = selectedParentCategory
-    ? safeServices.filter((s) => getParentCategory(s.name) === selectedParentCategory)
-    : [];
-
-  // Quan canvia el servei o la data, consultar disponibilitat
-  const handleFetchAvailability = async (srv: Service, dt: string) => {
-    if (!dt) return;
-    try {
-      setError('');
-      const data = await getAvailability(srv.space_id, dt);
-      setSlots(data.slots || []);
-    } catch (err: any) {
-      setError(err.message || 'Error al carregar disponibilitat');
-    }
-  };
-
-  // Demanar recomanació a SAFi quan es tria una franja
-  const handleSelectSlot = async (slotTime: string) => {
-    setSelectedSlot(slotTime);
-    setRecommendation(null);
-    if (!selectedService || !date) return;
-
-    try {
-      setLoadingRec(true);
-      const rec = await getRecommendation({
-        user_id: 'demo-user',
-        basis: {
-          space_id: selectedService.space_id,
-          weekday: new Date(date).toLocaleDateString('en-US', { weekday: 'long' }),
-        },
-        requested_start: slotTime,
-      });
-      setRecommendation(rec);
-    } catch (err) {
-      console.error('Error al obtenir recomanació SAFi', err);
-    } finally {
-      setLoadingRec(false);
-    }
-  };
-
-  // Confirmar la reserva realment contra el backend
-  const handleMakeReservation = async (useRecommended: boolean = false) => {
-    if (!selectedService || !date) return;
-
-    const startTime = useRecommended && recommendation ? recommendation.recommended_start : selectedSlot;
-    if (!startTime) return;
-
-    const [hours, minutes] = startTime.split(':').map(Number);
-    const startDate = new Date();
-    startDate.setHours(hours, minutes + 75);
-    const endTime = `${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`;
-
-    try {
-      setError('');
-      setMessage('');
-
-      // 1. Registrar l'acció de la recomanació si s'escau
-      if (recommendation) {
-        try {
-          const actionType = useRecommended ? 'accepted' : 'ignored';
-          const recId = recommendation.recommendation_id || recommendation.id || recommendation._id || 'rec-1';
-          await sendRecommendationAction(recId, actionType);
-        } catch (errRec) {
-          console.warn("Avís en registrar l'acció de recomanació:", errRec);
-        }
-      }
-
-      // 2. Crear la reserva real a la base de dades
-      await createReservation({
-        space_id: selectedService.space_id,
-        user_id: 'demo-user',
-        date: date,
-        start_time: startTime,
-        end_time: endTime,
-      });
-
-      setMessage('¡Reserva creada amb èxit i guardada a la base de dades!');
-      setSelectedSlot(null);
-      setRecommendation(null);
-    } catch (err: any) {
-      setError(err.message || 'Error al crear la reserva');
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-8">
-      <div className="max-w-4xl mx-auto space-y-8">
-        <div>
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
-            Reserva el teu Espai - SAF
-          </h1>
-          <p className="text-slate-400">Selecciona un espai principal i tria la pista o carrer disponible.</p>
-        </div>
-
-        {error && <div className="bg-red-900/50 border border-red-500 text-red-200 p-4 rounded-xl">{error}</div>}
-        {message && <div className="bg-emerald-900/50 border border-emerald-500 text-emerald-200 p-4 rounded-xl">{message}</div>}
-
-        {/* 1. Seleccionar Categoria d'Espai Pare */}
-        <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
-          <h2 className="text-xl font-semibold text-emerald-400">1. Tria un Espai Principal</h2>
-          {safeServices.length === 0 ? (
-            <p className="text-sm text-slate-400">Carregant serveis del backend...</p>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {parentCategories.map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => {
-                    setSelectedParentCategory(cat);
-                    setSelectedService(null);
-                    setSlots([]);
-                    setSelectedSlot(null);
-                  }}
-                  className={`p-4 rounded-xl border text-left transition-all ${
-                    selectedParentCategory === cat
-                      ? 'border-emerald-500 bg-emerald-950/30 text-emerald-300 shadow-lg'
-                      : 'border-slate-800 bg-slate-800/50 hover:border-slate-700'
-                  }`}
-                >
-                  <div className="font-bold text-lg">{cat}</div>
-                  <div className="text-xs text-slate-400 mt-1">
-                    {safeServices.filter((s) => getParentCategory(s.name) === cat).length} opcions disponibles
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* 2. Seleccionar Subespai / Pista corresponent */}
-        {selectedParentCategory && (
-          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
-            <h2 className="text-xl font-semibold text-emerald-400">
-              2. Selecciona Pista / Subespai de "{selectedParentCategory}"
-            </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {filteredSubspaces.map((srv) => (
-                <button
-                  key={srv.id}
-                  onClick={() => {
-                    setSelectedService(srv);
-                    if (date) handleFetchAvailability(srv, date);
-                  }}
-                  className={`p-4 rounded-xl border text-left transition-all ${
-                    selectedService?.id === srv.id
-                      ? 'border-cyan-500 bg-cyan-950/30 text-cyan-300 shadow-md'
-                      : 'border-slate-800 bg-slate-800/50 hover:border-slate-700'
-                  }`}
-                >
-                  <div className="font-bold">{srv.name}</div>
-                  <div className="text-xs text-slate-400 mt-1">{srv.description || `Espai: ${srv.space_id}`}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* 3. Seleccionar Data */}
-        {selectedService && (
-          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
-            <h2 className="text-xl font-semibold">3. Tria una Data</h2>
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => {
-                setDate(e.target.value);
-                handleFetchAvailability(selectedService, e.target.value);
-              }}
-              className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-slate-100 focus:outline-none focus:border-emerald-500"
-            />
-          </div>
-        )}
-
-        {/* 4. Seleccionar Franja Horària */}
-        {slots.length > 0 && (
-          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
-            <h2 className="text-xl font-semibold">4. Tria una Franja Horària</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {slots.map((slot, idx) => {
-                const timeText = slot.start_time || slot.time || slot.hour || `Franja ${idx + 1}`;
-                const scoreVal = slot.occupancy_score ?? slot.score ?? slot.points ?? '15';
-
-                return (
-                  <button
-                    key={idx}
-                    onClick={() => handleSelectSlot(timeText)}
-                    className={`p-3 rounded-xl border text-center transition-all ${
-                      selectedSlot === timeText
-                        ? 'border-cyan-500 bg-cyan-950/30 text-cyan-300'
-                        : 'border-slate-800 bg-slate-800/50 hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="font-mono font-bold">{timeText}</div>
-                    <div className="text-xs text-slate-400 mt-1">Score: {scoreVal}</div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* 5. Recomanació SAFi i Confirmació */}
-        {(selectedSlot || loadingRec) && (
-          <div className="bg-slate-900 border border-emerald-500/40 p-6 rounded-2xl shadow-xl space-y-4">
-            <h2 className="text-xl font-semibold text-emerald-400">🤖 Recomanació intel·ligent SAFi</h2>
-            {loadingRec ? (
-              <p className="text-slate-400">Analitzant hores òptimes...</p>
-            ) : recommendation ? (
-              <div className="bg-emerald-950/20 border border-emerald-900/50 p-4 rounded-xl space-y-2">
-                <p className="text-sm">{recommendation.reason}</p>
-                <p className="text-xs text-slate-400">
-                  Franja recomanada per evitar aglomeracions: <strong className="text-emerald-300">{recommendation.recommended_start}</strong>
-                </p>
-                <div className="flex gap-4 pt-2">
-                  <button
-                    onClick={() => handleMakeReservation(true)}
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl font-medium transition-colors"
-                  >
-                    Acceptar recomanació ({recommendation.recommended_start || 'Òptima'})
-                  </button>
-                  <button
-                    onClick={() => handleMakeReservation(false)}
-                    className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-xl font-medium transition-colors"
-                  >
-                    Mantenir la meva hora ({selectedSlot})
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <p className="text-slate-400">Hora seleccionada: <strong className="text-white">{selectedSlot}</strong></p>
-                <button
-                  onClick={() => handleMakeReservation(false)}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-xl font-medium transition-colors"
-                >
-                  Confirmar Reserva ({selectedService?.name})
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
+import {useEffect,useState} from 'react';
+import {createReservation,getRecommendation,getServiceAvailabilityWeek,getServices,sendRecommendationAction} from '../services/api';
+import type {Recommendation,Service,Slot} from '../services/api';
+export default function Reserva(){
+ const [services,setServices]=useState<Service[]>([]),[service,setService]=useState(''),[date,setDate]=useState(() => new Date(Date.now()+86400000).toLocaleDateString('en-CA'));
+ const [slots,setSlots]=useState<Slot[]>([]),[selected,setSelected]=useState<Slot|null>(null),[rec,setRec]=useState<Recommendation|null>(null);
+ const [error,setError]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[loading,setLoading]=useState(false);
+ useEffect(()=>{getServices().then(setServices).catch(e=>setError(String(e)));},[]);
+ useEffect(()=>{setSlots([]);setSelected(null);setRec(null);if(!service||!date)return;setLoading(true);getServiceAvailabilityWeek(service,date).then(v=>setSlots(v.days.find(x=>x.date===date)?.slots||[])).catch(e=>setError(e.message)).finally(()=>setLoading(false));},[service,date]);
+ async function choose(slot:Slot){setSelected(slot);setRec(null);setError('');try{setRec(await getRecommendation({service_id:service,date,preferred_start:slot.start,preferred_end:slot.end}));}catch(e){setError((e as Error).message);}}
+ async function reserve(useRec:boolean){if(!selected)return;setBusy(true);setError('');setMessage('');const start=useRec&&rec?.recommended_slot?.start?rec.recommended_slot.start:selected.start;
+ // Keep the duration of the original available slot; the backend validates the final slot.
+ const minutes=(t:string)=>Number(t.split(':')[0])*60+Number(t.split(':')[1]);
+ const len=minutes(selected.end)-minutes(selected.start);const endMin=minutes(start)+len;
+ const end=String(Math.floor(endMin/60)).padStart(2,'0')+':'+String(endMin%60).padStart(2,'0');
+ try{await createReservation({user_id:'demo-user',service_id:service,date,start,end});if(rec?.recommendation_id)await sendRecommendationAction(rec.recommendation_id,useRec?'accepted':'ignored').catch(console.warn);
+ setMessage('Reserva confirmada correctament: '+date+' '+start);setRec(null);setSelected(null);
+ const fresh=await getServiceAvailabilityWeek(service,date);setSlots(fresh.days.find(x=>x.date===date)?.slots||[]);
+ }catch(e){setError((e as Error).message);}finally{setBusy(false);}
+ }
+ return <div className="min-h-screen bg-slate-950 text-slate-100 p-6"><div className="max-w-5xl mx-auto space-y-6">
+ <h1 className="text-3xl font-bold text-emerald-400">Reserva el teu espai</h1>
+ <p className="text-slate-400">Tria un servei, consulta la disponibilitat real i deixa't orientar per SAFi.</p>
+ {error&&<div className="p-4 rounded-xl bg-red-900/40 border border-red-700" role="alert">{error}</div>}
+ {message&&<div className="p-4 rounded-xl bg-emerald-900/40 border border-emerald-700">{message}</div>}
+ <div className="grid md:grid-cols-2 gap-4"><label className="bg-slate-900 rounded-2xl p-5">Servei
+ <select className="block bg-slate-800 w-full mt-3 p-3 rounded-lg" value={service} onChange={e=>setService(e.target.value)}>
+ <option value="">Selecciona un servei</option>{services.filter(s=>s.reservable).map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+ <label className="bg-slate-900 rounded-2xl p-5">Data
+ <input type="date" className="block bg-slate-800 w-full mt-3 p-3 rounded-lg" value={date} onChange={e=>setDate(e.target.value)}/></label></div>
+ {loading&&<p>Consultant disponibilitat...</p>}
+ {service&&!loading&&<section className="bg-slate-900 rounded-2xl p-5"><h2 className="font-bold text-xl mb-4">Franges disponibles</h2>
+ {slots.length===0?<p className="text-slate-400">No hi ha franges per aquest dia.</p>:
+ <div className="grid grid-cols-2 md:grid-cols-5 gap-3">{slots.map(s=><button disabled={!s.available} key={s.start+s.end} onClick={()=>choose(s)}
+ className={'rounded-xl border p-3 text-left '+(!s.available?'opacity-35 border-slate-700':selected?.start===s.start?'bg-emerald-700 border-emerald-400':'bg-slate-800 border-slate-700 hover:border-emerald-400')}>
+ <strong>{s.start}–{s.end}</strong><div className="text-xs mt-1">{s.available?'Disponible':'Completa'}</div></button>)}</div>}
+ <p className="text-xs text-slate-400 mt-4">Disponibilitat operativa actual. No és una predicció d'ocupació.</p></section>}
+ {selected&&<section className="border border-emerald-700 bg-slate-900 rounded-2xl p-5 space-y-3">
+ <h2 className="text-xl text-emerald-400 font-bold">SAFi recomana</h2><p>{rec?.message||'Preparant recomanació...'}</p>
+ {rec?.recommended_slot&&<p className="text-emerald-300">Alternativa: {rec.recommended_slot.start}</p>}
+ <div className="flex gap-3 flex-wrap"><button disabled={busy} onClick={()=>reserve(false)} className="bg-emerald-600 px-5 py-3 rounded-xl disabled:opacity-50">Reservar {selected.start}</button>
+ {rec?.recommended_slot&&<button disabled={busy} onClick={()=>reserve(true)} className="bg-slate-700 px-5 py-3 rounded-xl disabled:opacity-50">Reservar {rec.recommended_slot.start}</button>}</div>
+ </section>}</div></div>;
 }
