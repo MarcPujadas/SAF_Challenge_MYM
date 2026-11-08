@@ -29,3 +29,8 @@ export const fetchAdminSummary = () => api<any>('/admin/summary');
 export const fetchAdminStats = () => api<any>('/admin/stats');
 export const fetchAdminReservations = () => api<any>('/admin/reservations');
 export const fetchAdminRecommendationsStats = (spaceId?:string) => api<any>('/admin/recommendations/stats' + (spaceId?'?space_id='+encodeURIComponent(spaceId):''));
+export type ServiceSpace = { service_id: string; space_id: string; resource_label: string; reservable: boolean; is_active: boolean };
+export const getServiceSpaces = (serviceId: string) =>
+  api<ServiceSpace[]>('/services/' + encodeURIComponent(serviceId) + '/spaces');
+export const fetchAdminRecommendationsByService = (serviceId?: string) =>
+  api<any>('/admin/recommendations/stats' + (serviceId ? '?service_id=' + encodeURIComponent(serviceId) : ''));

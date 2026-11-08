@@ -31,3 +31,7 @@ Panell de prova sense control d'accés; no desplegar en public sense autenticaci
 ## Versió de la Hajar integrada
 
 La branca `hajar/web-dashboard` (commit `c4ecaf3`) publica un dashboard bàsic com a punt d'entrada. La vista **Dashboard SAF** utilitza aquesta implementació, adaptant-la als noms de camp i a l'envolupant de l'API actual i mostrant els errors de connexió de manera real. Les funcionalitats avançades que ja existien a `main` es conserven a **SAFi Insights**; la reserva web continua separada. Aquesta integració evita incorporar fitxers d'entorns virtuals o un backend antic.
+
+## Integració definitiva (08/11/2026)
+
+La versió `c52c03b` de `hajar/web-dashboard` s'ha incorporat a `main`. Per mantenir les funcionalitats i la compatibilitat, el dashboard mostra **només dades retornades per la API**, no els valors ficticis del prototip. La nova pantalla de reserva manté el disseny i el pas a pas de la Hajar, però reserva per `service_id`, usa disponibilitat multiespai i respecta les franges `start/end` retornades pel backend. Les recomanacions no confonen previsió amb disponibilitat. La pestanya `SAFi Insights` conserva el treball preexistent. No s'han importat els fitxers `safhack.db` ni `web/.env` de la branca.
