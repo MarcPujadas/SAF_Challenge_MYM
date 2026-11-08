@@ -1,6 +1,7 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import type { OccupancyLevel, ServiceWeekSlot } from '../services/api';
+import { colors, heatTones, radius, spacing } from '../theme/theme';
 import { parseDate, weekdayShort } from '../utils/dates';
 
 // Presentacio pura: no calcula ocupacio ni disponibilitat, nomes pinta el que rep.
@@ -9,13 +10,7 @@ export type Tone = 'good' | 'warn' | 'high' | 'bad' | 'unknown';
 export type CellValue = { tone: Tone; text: string; sub?: string };
 export type HeatmapMode = 'availability' | 'forecast';
 
-const TONE_COLOR: Record<Tone, string> = {
-  good: '#a5d6a7',
-  warn: '#fff59d',
-  high: '#ffcc80',
-  bad: '#ef9a9a',
-  unknown: '#e0e0e0',
-};
+const TONE_COLOR: Record<Tone, string> = heatTones;
 
 const LEVEL_TONE: Record<OccupancyLevel, Tone> = {
   low: 'good',
@@ -78,9 +73,12 @@ export default function HeatmapGrid({
   selected,
   compact,
 }: Props) {
-  const cellW = compact ? 40 : 46;
-  const cellH = compact ? 34 : 44;
-  const hourW = compact ? 42 : 48;
+  // Amplada de cel·la adaptada a la pantalla (7 dies visibles quan hi caben), amb scroll horitzontal si no.
+  const { width } = useWindowDimensions();
+  const hourW = compact ? 44 : 50;
+  const fit = Math.floor((width - spacing.lg * 2 - hourW - 4) / Math.max(dates.length, 1));
+  const cellW = Math.max(compact ? 40 : 44, Math.min(fit, 64));
+  const cellH = compact ? 36 : 46;
 
   return (
     <View>
@@ -107,12 +105,16 @@ export default function HeatmapGrid({
                     key={d}
                     disabled={!value || !onCellPress || off}
                     onPress={() => onCellPress?.(d, r)}
-                    style={[
+                    accessibilityLabel={
+                      value ? `${d} ${r}: ${value.text}${value.sub ? ` ${value.sub}` : ''}` : `${d} ${r}: sense franja`
+                    }
+                    style={({ pressed }) => [
                       styles.cell,
                       { width: cellW, height: cellH },
                       value ? { backgroundColor: TONE_COLOR[value.tone] } : styles.empty,
                       off && styles.pastCell,
                       isSel && styles.selected,
+                      pressed && styles.pressed,
                     ]}
                   >
                     <Text style={[styles.cellText, compact && styles.cellTextSmall]} numberOfLines={1}>
@@ -161,24 +163,25 @@ export function HeatmapLegend({ mode }: { mode: HeatmapMode }) {
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row' },
-  head: { textAlign: 'center', fontWeight: 'bold', fontSize: 13 },
-  headDay: { textAlign: 'center', fontSize: 11, color: '#666', marginBottom: 4 },
-  hour: { fontSize: 12, color: '#444', textAlignVertical: 'center', paddingTop: 10 },
+  head: { textAlign: 'center', fontWeight: '700', fontSize: 13, color: colors.text },
+  headDay: { textAlign: 'center', fontSize: 12, color: colors.textMuted, marginBottom: spacing.xs },
+  hour: { fontSize: 12, color: colors.textMuted, textAlignVertical: 'center', paddingTop: 12 },
   cell: {
     borderWidth: 1,
-    borderColor: '#fff',
-    borderRadius: 4,
+    borderColor: colors.surface,
+    borderRadius: radius.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  empty: { backgroundColor: '#f5f5f5' },
+  empty: { backgroundColor: colors.surfaceMuted },
   pastCell: { opacity: 0.4 },
-  selected: { borderColor: '#1565c0', borderWidth: 3 },
-  cellText: { fontSize: 11, fontWeight: '600' },
-  cellTextSmall: { fontSize: 10 },
-  cellSub: { fontSize: 10, color: '#444' },
-  legend: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 10, gap: 10 },
-  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  legendDot: { width: 12, height: 12, borderRadius: 3 },
-  legendText: { fontSize: 12, color: '#444' },
+  pressed: { opacity: 0.75 },
+  selected: { borderColor: colors.primaryDark, borderWidth: 3 },
+  cellText: { fontSize: 12, fontWeight: '700', color: colors.text },
+  cellTextSmall: { fontSize: 11 },
+  cellSub: { fontSize: 11, color: colors.text },
+  legend: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.md, gap: spacing.md },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  legendDot: { width: 14, height: 14, borderRadius: 4, borderWidth: 1, borderColor: colors.border },
+  legendText: { fontSize: 12, color: colors.textMuted },
 });
