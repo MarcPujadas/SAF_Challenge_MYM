@@ -1,9 +1,14 @@
+import json
 from pathlib import Path
 
 import pandas as pd
 
 from app.database.database import (
     get_connection,
+    init_db,
+)
+from app.services.catalog_service import (
+    get_historical_import_quality_report,
 )
 
 
@@ -12,12 +17,13 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 HISTORICAL_PATH = (
     BASE_DIR
     / "data"
-    / "processed"
+    / "local"
     / "historical_occupancy.csv"
 )
 
 
 def main():
+    init_db()
     print("=" * 70)
     print("SAF DATA INTEGRITY CHECK")
     print("=" * 70)
@@ -39,11 +45,18 @@ def main():
             ORDER BY id
             """
         ).fetchall()
+        virtual_resources = connection.execute(
+            """
+            SELECT space_id
+            FROM service_spaces
+            WHERE is_active = 1 AND is_virtual = 1
+            """
+        ).fetchall()
 
     space_ids = {
         row["id"]
         for row in spaces
-    }
+    } | {row["space_id"] for row in virtual_resources}
 
     print()
     print("SQLITE")
@@ -82,20 +95,15 @@ def main():
     if not HISTORICAL_PATH.exists():
         print()
         print(
-            "ERROR: no existeix "
+            "AVÍS: no existeix "
             "historical_occupancy.csv"
         )
-
-        return
-
-    historical = pd.read_csv(
-        HISTORICAL_PATH
-    )
+        historical = pd.DataFrame(columns=["space_id"])
+    else:
+        historical = pd.read_csv(HISTORICAL_PATH)
 
     historical_space_ids = set(
-        historical["space_id"]
-        .dropna()
-        .unique()
+        historical["space_id"].dropna().unique()
     )
 
     print()
@@ -106,6 +114,15 @@ def main():
         "Files:",
         len(historical)
     )
+
+    if "reservations" in historical.columns:
+        print(
+            "Volum legacy de reserves (no s'afegeix al nou import):",
+            pd.to_numeric(
+                historical["reservations"],
+                errors="coerce",
+            ).sum(),
+        )
 
     print(
         "Espais diferents:",
@@ -201,6 +218,18 @@ def main():
             "ATENCIÓ: hi ha inconsistències "
             "que s'han de revisar."
         )
+
+    print()
+    print("HISTORICAL USAGE QUALITY")
+    print("-" * 70)
+    quality_report = get_historical_import_quality_report()
+    print(
+        json.dumps(
+            quality_report,
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

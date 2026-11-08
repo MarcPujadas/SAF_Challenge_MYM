@@ -9,18 +9,14 @@ import httpx
 
 from app.common import ApiError
 from app.config.services import SERVICE_BY_ID
-from app.services.availability_service import get_slot_availability
+from app.services.availability_service import get_service_week_availability
 from app.services.historical_service import (
-    get_historical_occupancy,
-    occupancy_level,
-)
-from app.services.recommendation_service import (
-    get_best_alternative,
-    get_quietest_slot,
+    get_service_best_alternative,
+    get_service_historical_occupancy,
+    get_service_quietest_slot,
 )
 from app.services.reservation_service import get_user_reservation_context
 from app.services.schedule_service import (
-    minutes_to_time,
     parse_date,
     time_to_minutes,
 )
@@ -65,7 +61,7 @@ _SERVICE_PROPERTY = {
 }
 TOOLS = [
     _tool(
-        "get_occupancy_forecast",
+        "get_service_occupancy_forecast",
         "Consulta la previsió d'ocupació històrica d'un servei, dia i hora opcionals.",
         {
             "service": _SERVICE_PROPERTY,
@@ -75,7 +71,7 @@ TOOLS = [
         ["service", "date"],
     ),
     _tool(
-        "get_booking_availability",
+        "get_service_booking_availability",
         "Consulta la disponibilitat actual d'un slot vàlid a SQLite.",
         {
             "service": _SERVICE_PROPERTY,
@@ -120,7 +116,7 @@ def _service(service_id: Any):
     return SERVICE_BY_ID.get(service_id)
 
 
-def get_occupancy_forecast(
+def get_service_occupancy_forecast(
     service_id: str,
     date_value: str,
     start: str | None = None,
@@ -128,17 +124,12 @@ def get_occupancy_forecast(
     service = _service(service_id)
     if service is None:
         return _unavailable("Unsupported service.")
-    if not service.safi_recommendations:
-        return _unavailable(
-            "SAFi occupancy recommendations are not available for this space type."
-        )
     requested_date = parse_date(date_value)
     weekday = requested_date.weekday()
     result: dict[str, Any] = {
         "available": True,
         "service_id": service.service_id,
         "service_name": service.name,
-        "space_id": service.space_id,
         "date": requested_date.isoformat(),
         "weekday": WEEKDAYS_CA[weekday],
         "forecast_type": "historical_prediction",
@@ -147,10 +138,18 @@ def get_occupancy_forecast(
 
     try:
         if start is None:
-            quietest = get_quietest_slot(service.space_id, weekday)
+            quietest_result = get_service_quietest_slot(
+                service_id,
+                weekday,
+                aggregate=True,
+            )
+            quietest = quietest_result.get("slot")
             if quietest is None:
                 return _unavailable(
-                    "No historical occupancy data available."
+                    quietest_result.get(
+                        "unavailable_reason",
+                        "No historical occupancy data available.",
+                    )
                 )
             score = quietest["occupancy_score"]
             result["quietest_slot"] = {
@@ -161,10 +160,11 @@ def get_occupancy_forecast(
             }
             return result
 
-        requested = get_historical_occupancy(
-            space_id=service.space_id,
+        requested = get_service_historical_occupancy(
+            service_id=service_id,
             weekday=weekday,
             start_time=start,
+            aggregate=True,
         )
     except FileNotFoundError:
         return _unavailable("No historical occupancy data available.")
@@ -173,13 +173,15 @@ def get_occupancy_forecast(
         return _unavailable("No historical occupancy data available.")
 
     try:
-        alternative = get_best_alternative(
-            space_id=service.space_id,
+        alternative_result = get_service_best_alternative(
+            service_id=service_id,
             weekday=weekday,
             preferred_start=start,
+            aggregate=True,
         )
     except FileNotFoundError:
-        alternative = None
+        alternative_result = {"alternative": None}
+    alternative = alternative_result.get("alternative")
     if (
         alternative is not None
         and alternative["occupancy_score"] >= requested["occupancy_score"]
@@ -198,7 +200,7 @@ def get_occupancy_forecast(
     return result
 
 
-def get_booking_availability(
+def get_service_booking_availability(
     service_id: str,
     date_value: str,
     start: str,
@@ -208,25 +210,48 @@ def get_booking_availability(
         return _unavailable("Unsupported service.")
     requested_date = parse_date(date_value)
     start_minutes = time_to_minutes(start)
-    end = minutes_to_time(
-        start_minutes + service.slot_duration_minutes
-    )
-    slot = get_slot_availability(
-        service.space_id,
+    end = f"{(start_minutes + service.slot_duration_minutes) // 60:02d}:{(start_minutes + service.slot_duration_minutes) % 60:02d}"
+    availability = get_service_week_availability(
+        service_id,
         requested_date,
-        start,
-        end,
-        include_forecast=False,
+        requested_date,
     )
+    matching = next(
+        (
+            slot
+            for day in availability["days"]
+            if day["date"] == requested_date.isoformat()
+            for slot in day["slots"]
+            if slot["start"] == start and slot["end"] == end
+        ),
+        None,
+    )
+    if matching is None:
+        return _unavailable("The requested service slot is not available.")
     return {
-        "available": True,
+        "available": matching["available"],
         "service_id": service.service_id,
         "service_name": service.name,
-        "space_id": service.space_id,
         "date": requested_date.isoformat(),
-        **slot,
+        **matching,
         "source": "current_reservations_database",
     }
+
+
+def get_occupancy_forecast(
+    service_id: str,
+    date_value: str,
+    start: str | None = None,
+) -> dict[str, Any]:
+    return get_service_occupancy_forecast(service_id, date_value, start)
+
+
+def get_booking_availability(
+    service_id: str,
+    date_value: str,
+    start: str,
+) -> dict[str, Any]:
+    return get_service_booking_availability(service_id, date_value, start)
 
 
 def get_user_reservations(
@@ -235,18 +260,19 @@ def get_user_reservations(
     date_from: str | None = None,
     date_to: str | None = None,
 ) -> dict[str, Any]:
-    space_id = None
     if service_id is not None:
         service = _service(service_id)
         if service is None:
             return _unavailable("Unsupported service.")
-        space_id = service.space_id
-    return get_user_reservation_context(
-        user_id=user_id,
-        date_from=date_from,
-        date_to=date_to,
-        space_id=space_id,
-    )
+    arguments = {
+        "user_id": user_id,
+        "date_from": date_from,
+        "date_to": date_to,
+        "space_id": None,
+    }
+    if service_id is not None:
+        arguments["service_id"] = service_id
+    return get_user_reservation_context(**arguments)
 
 
 def execute_tool(
@@ -255,7 +281,10 @@ def execute_tool(
     user_id: str,
 ) -> dict[str, Any]:
     try:
-        if name == "get_occupancy_forecast":
+        if name in {
+            "get_service_occupancy_forecast",
+            "get_occupancy_forecast",
+        }:
             service_id = arguments.get("service")
             date_value = arguments.get("date")
             if not isinstance(service_id, str) or not isinstance(date_value, str):
@@ -263,15 +292,26 @@ def execute_tool(
             start = arguments.get("start")
             if start is not None and not isinstance(start, str):
                 return _unavailable("Invalid start time.")
-            return get_occupancy_forecast(service_id, date_value, start)
+            return get_service_occupancy_forecast(
+                service_id,
+                date_value,
+                start,
+            )
 
-        if name == "get_booking_availability":
+        if name in {
+            "get_service_booking_availability",
+            "get_booking_availability",
+        }:
             service_id = arguments.get("service")
             date_value = arguments.get("date")
             start = arguments.get("start")
             if not all(isinstance(value, str) for value in (service_id, date_value, start)):
                 return _unavailable("Missing service, date or start time.")
-            return get_booking_availability(service_id, date_value, start)
+            return get_service_booking_availability(
+                service_id,
+                date_value,
+                start,
+            )
 
         if name == "get_user_reservations":
             service_id = arguments.get("service")
@@ -333,11 +373,15 @@ def call_ornith(
 
 def _tool_source(name: str, result: dict[str, Any]) -> dict[str, Any]:
     source_type = {
+        "get_service_occupancy_forecast": "historical_occupancy",
         "get_occupancy_forecast": "historical_occupancy",
+        "get_service_booking_availability": "current_reservations_database",
         "get_booking_availability": "current_reservations_database",
         "get_user_reservations": "current_reservations_database",
     }[name]
     source: dict[str, Any] = {"type": source_type}
+    if result.get("service_id") is not None:
+        source["service_id"] = result["service_id"]
     if result.get("space_id") is not None:
         source["space_id"] = result["space_id"]
     elif result.get("reservations"):
@@ -395,6 +439,8 @@ def chat_with_ornith(message: str, user_id: str) -> dict[str, Any]:
         if result.get("forecast_type") or result.get("source"):
             has_usable_data = True
         if name in {
+            "get_service_occupancy_forecast",
+            "get_service_booking_availability",
             "get_occupancy_forecast",
             "get_booking_availability",
             "get_user_reservations",
@@ -424,6 +470,7 @@ def chat_with_ornith(message: str, user_id: str) -> dict[str, Any]:
         {
             (
                 source["type"],
+                source.get("service_id"),
                 source.get("space_id"),
                 tuple(source.get("space_ids", [])),
             ): source

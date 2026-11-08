@@ -259,7 +259,7 @@ def test_safi_advice_does_not_recommend_an_equal_or_busier_alternative():
     )
 
 
-def test_chat_normalizes_time_uses_real_space_and_catalan_weekday():
+def test_chat_normalizes_time_uses_service_forecast_and_catalan_weekday():
     recommendation = {
         "requested_slot": {
             "start": "18:30",
@@ -273,10 +273,14 @@ def test_chat_normalizes_time_uses_real_space_and_catalan_weekday():
         },
     }
     with (
-        patch.object(safi_service, "recommend", return_value=recommendation) as mock,
         patch.object(
             safi_service,
-            "get_historical_occupancy",
+            "recommend_service",
+            return_value=recommendation,
+        ) as mock,
+        patch.object(
+            safi_service,
+            "get_service_historical_occupancy",
             return_value={"samples": 12},
         ) as samples,
     ):
@@ -285,7 +289,7 @@ def test_chat_normalizes_time_uses_real_space_and_catalan_weekday():
         )
 
     mock.assert_called_once()
-    assert mock.call_args.args[0] == "sala-fitnes-sala-cardio"
+    assert mock.call_args.args[0] == "fitness"
     assert mock.call_args.args[2] == "09:00"
     assert result["message"] == (
         "A les 18:30 de dimarts l'ocupació acostuma a ser alta. "
@@ -293,9 +297,14 @@ def test_chat_normalizes_time_uses_real_space_and_catalan_weekday():
         "Basat en 12 dies amb dades (abril-octubre 2026)."
     )
     assert result["sources"][0]["type"] == "historical_occupancy"
-    assert result["sources"][0]["space_id"] == "sala-fitnes-sala-cardio"
+    assert result["sources"][0]["service_id"] == "fitness"
     assert result["sources"][0]["date_reference"] == "dimarts"
-    samples.assert_called_once_with("sala-fitnes-sala-cardio", 1, "18:30")
+    samples.assert_called_once_with(
+        "fitness",
+        1,
+        "18:30",
+        aggregate=True,
+    )
 
 
 def test_chat_returns_unknown_when_requested_occupancy_has_no_data():
@@ -307,7 +316,11 @@ def test_chat_returns_unknown_when_requested_occupancy_has_no_data():
         },
         "recommended_slot": None,
     }
-    with patch.object(safi_service, "recommend", return_value=recommendation):
+    with patch.object(
+        safi_service,
+        "recommend_service",
+        return_value=recommendation,
+    ):
         result = safi_service.chat("Quan hi ha menys gent al fitness a les 9:00?")
 
     assert result["can_answer"] is False
@@ -434,19 +447,7 @@ def test_best_day_alternative_returns_none_without_better_day_or_data(
     ) is None
 
 
-@pytest.mark.parametrize(
-    ("phrase", "expected_space_id"),
-    [
-        ("fitness", FITNESS_SPACE_ID),
-        ("piscina de 25 m", POOL_SPACE_ID),
-        ("piscina de 16 m", "piscina-de-16-metres"),
-        ("activitats dirigides", "sales-activitats-dirigides-sala-1"),
-    ],
-)
-def test_safi_chat_answers_supported_services_and_detects_weekday_time(
-    phrase,
-    expected_space_id,
-):
+def test_safi_chat_answers_validated_service_forecast():
     recommendation = {
         "requested_slot": {
             "start": "09:00",
@@ -458,23 +459,23 @@ def test_safi_chat_answers_supported_services_and_detects_weekday_time(
     with (
         patch.object(
             safi_service,
-            "recommend",
+            "recommend_service",
             return_value=recommendation,
         ) as recommend,
         patch.object(
             safi_service,
-            "get_historical_occupancy",
+            "get_service_historical_occupancy",
             return_value={"samples": 12},
         ),
     ):
         result = safi_service.chat(
-            f"Quan hi ha menys ocupació al {phrase} dimarts a les 9:00?"
+            "Quan hi ha menys ocupació al fitness dimarts a les 9:00?"
         )
 
     assert result["can_answer"] is True
-    assert result["sources"][0]["space_id"] == expected_space_id
+    assert result["sources"][0]["service_id"] == "fitness"
     assert result["sources"][0]["date_reference"] == "dimarts"
-    assert recommend.call_args.args[0] == expected_space_id
+    assert recommend.call_args.args[0] == "fitness"
     assert recommend.call_args.args[2] == "09:00"
 
 
@@ -494,7 +495,7 @@ def test_safi_chat_does_not_recommend_court_services():
 def test_safi_chat_returns_unknown_when_supported_service_has_no_data():
     with patch.object(
         safi_service,
-        "recommend",
+        "recommend_service",
         return_value={
             "requested_slot": {
                 "start": None,

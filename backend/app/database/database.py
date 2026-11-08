@@ -3,6 +3,9 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from app.database.service_spaces import seed_service_spaces
+
+
 DB_PATH = Path(__file__).resolve().parent / "safhack.db"
 
 
@@ -41,10 +44,113 @@ def init_db() -> None:
                 FOREIGN KEY (space_id) REFERENCES spaces(id)
             );
 
+            CREATE TABLE IF NOT EXISTS service_spaces (
+                service_id TEXT NOT NULL,
+                space_id TEXT NOT NULL,
+                resource_label TEXT NOT NULL,
+                person_capacity INTEGER,
+                reservation_capacity INTEGER,
+                capacity_mode TEXT NOT NULL CHECK (
+                    capacity_mode IN ('people', 'resource_units')
+                ),
+                is_active INTEGER NOT NULL DEFAULT 1 CHECK (
+                    is_active IN (0, 1)
+                ),
+                is_virtual INTEGER NOT NULL DEFAULT 0 CHECK (
+                    is_virtual IN (0, 1)
+                ),
+                display_order INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (service_id, space_id),
+                FOREIGN KEY (service_id) REFERENCES services(id),
+                CHECK (person_capacity IS NULL OR person_capacity >= 0),
+                CHECK (
+                    reservation_capacity IS NULL
+                    OR reservation_capacity >= 0
+                )
+            );
+
+            CREATE TABLE IF NOT EXISTS data_sources (
+                id TEXT PRIMARY KEY,
+                source_type TEXT NOT NULL,
+                label TEXT NOT NULL,
+                period_from TEXT,
+                period_to TEXT,
+                imported_at TEXT,
+                checksum TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS historical_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_id TEXT NOT NULL,
+                source_checksum TEXT NOT NULL,
+                source_record_key TEXT NOT NULL,
+                service_id TEXT,
+                space_id TEXT,
+                date TEXT,
+                weekday INTEGER,
+                start_time TEXT,
+                end_time TEXT,
+                raw_reservation_count REAL,
+                raw_reservation_value TEXT,
+                people_count REAL,
+                occupied_units REAL,
+                capacity_people_snapshot REAL,
+                capacity_units_snapshot REAL,
+                occupancy_ratio REAL,
+                raw_resource_name TEXT,
+                capacity_mode TEXT NOT NULL DEFAULT 'unknown' CHECK (
+                    capacity_mode IN ('people', 'resource_units', 'unknown')
+                ),
+                mapping_status TEXT NOT NULL CHECK (
+                    mapping_status IN ('mapped', 'manual_review', 'ignored')
+                ),
+                capacity_share REAL DEFAULT 1.0 CHECK (
+                    capacity_share IS NULL OR capacity_share > 0
+                ),
+                imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(source_id, source_checksum, source_record_key),
+                FOREIGN KEY (source_id) REFERENCES data_sources(id)
+            );
+
+            CREATE TRIGGER IF NOT EXISTS
+            service_spaces_require_existing_physical_space_insert
+            BEFORE INSERT ON service_spaces
+            WHEN NEW.is_virtual = 0
+                AND NOT EXISTS (
+                    SELECT 1 FROM spaces WHERE id = NEW.space_id
+                )
+            BEGIN
+                SELECT RAISE(ABORT, 'Physical service space does not exist');
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS
+            service_spaces_require_existing_physical_space_update
+            BEFORE UPDATE OF space_id, is_virtual ON service_spaces
+            WHEN NEW.is_virtual = 0
+                AND NOT EXISTS (
+                    SELECT 1 FROM spaces WHERE id = NEW.space_id
+                )
+            BEGIN
+                SELECT RAISE(ABORT, 'Physical service space does not exist');
+            END;
+
+            CREATE INDEX IF NOT EXISTS idx_service_spaces_space_active
+            ON service_spaces(space_id, is_active);
+
+            CREATE INDEX IF NOT EXISTS idx_historical_usage_current_lookup
+            ON historical_usage(source_id, source_checksum, service_id, date);
+
+            CREATE INDEX IF NOT EXISTS idx_historical_usage_resource_date
+            ON historical_usage(space_id, date, start_time, mapping_status);
+
             CREATE TABLE IF NOT EXISTS reservations (
                 id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
                 space_id TEXT NOT NULL,
+                service_id TEXT,
+                participants_count INTEGER CHECK (
+                    participants_count IS NULL OR participants_count > 0
+                ),
                 date TEXT NOT NULL,
                 start TEXT NOT NULL,
                 end TEXT NOT NULL,
@@ -57,7 +163,8 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS recommendations (
                 id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
-                space_id TEXT NOT NULL,
+                space_id TEXT,
+                service_id TEXT,
                 date TEXT NOT NULL,
                 requested_start TEXT NOT NULL,
                 recommended_start TEXT,
@@ -99,12 +206,144 @@ def init_db() -> None:
             """
         )
 
+        reservation_columns = {
+            row["name"]
+            for row in connection.execute(
+                "PRAGMA table_info(reservations)"
+            ).fetchall()
+        }
+        if "service_id" not in reservation_columns:
+            connection.execute(
+                "ALTER TABLE reservations ADD COLUMN service_id TEXT"
+            )
+        if "participants_count" not in reservation_columns:
+            connection.execute(
+                "ALTER TABLE reservations ADD COLUMN participants_count "
+                "INTEGER CHECK (participants_count IS NULL OR "
+                "participants_count > 0)"
+            )
+
+        recommendation_columns = {
+            row["name"]
+            for row in connection.execute(
+                "PRAGMA table_info(recommendations)"
+            ).fetchall()
+        }
+        if "service_id" not in recommendation_columns:
+            connection.execute(
+                "ALTER TABLE recommendations ADD COLUMN service_id TEXT"
+            )
+        recommendation_space = next(
+            row
+            for row in connection.execute(
+                "PRAGMA table_info(recommendations)"
+            ).fetchall()
+            if row["name"] == "space_id"
+        )
+        if recommendation_space["notnull"]:
+            connection.execute("PRAGMA foreign_keys = OFF")
+            connection.executescript(
+                """
+                CREATE TABLE recommendations_rebuilt (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    space_id TEXT,
+                    service_id TEXT,
+                    date TEXT NOT NULL,
+                    requested_start TEXT NOT NULL,
+                    recommended_start TEXT,
+                    requested_score INTEGER,
+                    recommended_score INTEGER,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id),
+                    FOREIGN KEY (space_id) REFERENCES spaces(id)
+                );
+                INSERT INTO recommendations_rebuilt (
+                    id, user_id, space_id, service_id, date,
+                    requested_start, recommended_start, requested_score,
+                    recommended_score, created_at
+                )
+                SELECT
+                    id, user_id, space_id, service_id, date,
+                    requested_start, recommended_start, requested_score,
+                    recommended_score, created_at
+                FROM recommendations;
+                DROP TABLE recommendations;
+                ALTER TABLE recommendations_rebuilt
+                    RENAME TO recommendations;
+                CREATE INDEX IF NOT EXISTS idx_recommendations_user
+                    ON recommendations(user_id);
+                CREATE INDEX IF NOT EXISTS idx_recommendations_space_date
+                    ON recommendations(space_id, date);
+                """
+            )
+            connection.execute("PRAGMA foreign_keys = ON")
+
         connection.execute(
             "INSERT OR IGNORE INTO users (id, name) VALUES (?, ?)",
             ("demo-user", "Usuari Demo"),
         )
-
-        
-
-        
-        
+        connection.executemany(
+            """
+            INSERT OR IGNORE INTO data_sources (
+                id, source_type, label, imported_at
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            [
+                (
+                    "saf_reserves_2026",
+                    "saf_historical",
+                    "SAF reserves 2026",
+                    None,
+                ),
+                (
+                    "saf_guided_activities_2026",
+                    "saf_historical",
+                    "SAF guided activities 2026",
+                    None,
+                ),
+            ],
+        )
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO data_sources (
+                id, source_type, label, imported_at
+            )
+            VALUES (
+                'app_live',
+                'application_operational',
+                'SAF Hack app reservations',
+                CURRENT_TIMESTAMP
+            )
+            """
+        )
+        seed_service_spaces(connection)
+        connection.execute(
+            """
+            UPDATE reservations
+            SET service_id = (
+                SELECT service_id
+                FROM service_spaces
+                WHERE service_spaces.space_id = reservations.space_id
+                    AND service_spaces.is_active = 1
+                ORDER BY display_order, service_id
+                LIMIT 1
+            )
+            WHERE service_id IS NULL
+            """
+        )
+        connection.execute(
+            """
+            UPDATE recommendations
+            SET service_id = (
+                SELECT service_id
+                FROM service_spaces
+                WHERE service_spaces.space_id = recommendations.space_id
+                    AND service_spaces.is_active = 1
+                ORDER BY display_order, service_id
+                LIMIT 1
+            )
+            WHERE service_id IS NULL
+            """
+        )

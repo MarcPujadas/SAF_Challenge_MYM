@@ -7,6 +7,9 @@ from app.database.database import (
     DB_PATH,
     get_connection,
 )
+from app.services.catalog_service import (
+    get_historical_import_quality_report,
+)
 
 from scripts.import_spaces import (
     main as import_spaces,
@@ -30,7 +33,7 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 DATASET_PATH = (
     BASE_DIR
     / "data"
-    / "raw"
+    / "local"
     / "saf-espais-2026-equips.xlsx"
 )
 
@@ -40,6 +43,7 @@ HISTORICAL_PATH = (
     / "processed"
     / "historical_occupancy.csv"
 )
+EXPECTED_SPACE_COUNT = 43
 
 
 def reset_database():
@@ -97,11 +101,26 @@ def get_database_summary():
             """
         ).fetchone()["total"]
 
+        service_spaces = connection.execute(
+            "SELECT COUNT(*) AS total FROM service_spaces"
+        ).fetchone()["total"]
+
+        data_sources = connection.execute(
+            "SELECT COUNT(*) AS total FROM data_sources"
+        ).fetchone()["total"]
+
+        historical_usage = connection.execute(
+            "SELECT COUNT(*) AS total FROM historical_usage"
+        ).fetchone()["total"]
+
     return {
         "spaces": spaces,
         "services": services,
         "users": users,
         "reservations": reservations,
+        "service_spaces": service_spaces,
+        "data_sources": data_sources,
+        "historical_usage": historical_usage,
     }
 
 
@@ -110,9 +129,9 @@ def validate_setup():
 
     errors = []
 
-    if summary["spaces"] != 40:
+    if summary["spaces"] != EXPECTED_SPACE_COUNT:
         errors.append(
-            f"Expected 40 spaces, found "
+            f"Expected {EXPECTED_SPACE_COUNT} spaces, found "
             f"{summary['spaces']}."
         )
 
@@ -120,6 +139,12 @@ def validate_setup():
         errors.append(
             f"Expected 8 services, found "
             f"{summary['services']}."
+        )
+
+    if summary["data_sources"] < 3:
+        errors.append(
+            "Expected at least 3 registered data sources, found "
+            f"{summary['data_sources']}."
         )
 
     if summary["users"] < 1:
@@ -131,6 +156,15 @@ def validate_setup():
         errors.append(
             "historical_occupancy.csv was not created."
         )
+
+    quality_report = get_historical_import_quality_report()
+    for service_id, gate in quality_report["resource_gates"].items():
+        if not gate["passed"]:
+            errors.append(
+                f"Resource gate {service_id} requires "
+                f"{gate['minimum_expected']} resources; found "
+                f"{gate['mapped_resources']}."
+            )
 
     if errors:
         print()
@@ -169,6 +203,21 @@ def validate_setup():
     print(
         "Reservations:",
         summary["reservations"]
+    )
+
+    print(
+        "Service resources:",
+        summary["service_spaces"]
+    )
+
+    print(
+        "Data sources:",
+        summary["data_sources"]
+    )
+
+    print(
+        "Historical usage rows:",
+        summary["historical_usage"]
     )
 
     print(

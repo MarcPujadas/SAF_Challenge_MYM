@@ -5,7 +5,10 @@ from pydantic import BaseModel
 
 from app.common import ApiError, success
 from app.services.catalog_service import supports_safi_recommendations
-from app.services.recommendation_service import recommend
+from app.services.recommendation_service import (
+    recommend,
+    recommend_service,
+)
 from app.services.recommendation_tracking_service import (
     save_recommendation,
     save_recommendation_action,
@@ -17,7 +20,8 @@ router = APIRouter(prefix="/api/v1")
 
 
 class RecommendationRequest(BaseModel):
-    space_id: str
+    space_id: str | None = None
+    service_id: str | None = None
     date: str
     preferred_start: str
     preferred_end: str
@@ -43,7 +47,28 @@ def create_recommendation(
         if end_minutes <= start_minutes:
             raise ValueError("preferred_end must be later than preferred_start.")
 
-        if not supports_safi_recommendations(payload.space_id):
+        if payload.service_id is not None and payload.space_id is not None:
+            raise ApiError(
+                "INVALID_FILTER",
+                "Provide either service_id or space_id, not both.",
+            )
+        if payload.service_id is None and payload.space_id is None:
+            raise ApiError(
+                "INVALID_FILTER",
+                "service_id or space_id is required.",
+            )
+
+        if payload.service_id is not None:
+            result = recommend_service(
+                payload.service_id,
+                parsed_date.isoformat(),
+                payload.preferred_start,
+                payload.preferred_end,
+            )
+            if not result.get("recommendation_available", True):
+                result["recommendation_id"] = None
+                return success(result)
+        elif not supports_safi_recommendations(payload.space_id):
             weekday_names = (
                 "Monday",
                 "Tuesday",
@@ -77,12 +102,13 @@ def create_recommendation(
                 }
             )
 
-        result = recommend(
-            payload.space_id,
-            parsed_date.isoformat(),
-            payload.preferred_start,
-            payload.preferred_end,
-        )
+        else:
+            result = recommend(
+                payload.space_id,
+                parsed_date.isoformat(),
+                payload.preferred_start,
+                payload.preferred_end,
+            )
     except ValueError as exc:
         raise ApiError("INVALID_TIME", str(exc)) from exc
 
@@ -110,6 +136,7 @@ def create_recommendation(
             if recommended_slot is not None
             else None
         ),
+        service_id=payload.service_id,
     )
     result["recommendation_id"] = recommendation_id
     return success(result)

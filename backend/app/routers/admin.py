@@ -52,6 +52,7 @@ def admin_occupancy(
 @router.get("/admin/recommendations/stats")
 def admin_recommendation_stats(
     space_id: str | None = None,
+    service_id: str | None = None,
     date_from: str | None = Query(default=None, alias="from"),
     date_to: str | None = Query(default=None, alias="to"),
 ) -> dict[str, Any]:
@@ -60,7 +61,13 @@ def admin_recommendation_stats(
         {
             "period": {"from": start, "to": end},
             "space_id": space_id,
-            **get_recommendation_stats(space_id, start, end),
+            "service_id": service_id,
+            **get_recommendation_stats(
+                space_id,
+                start,
+                end,
+                service_id=service_id,
+            ),
         }
     )
 
@@ -147,13 +154,21 @@ def cancellations(
 @router.get("/admin/analytics/safi-impact")
 def safi_impact(
     space_id: str | None = None,
+    service_id: str | None = None,
     date_from: str | None = Query(default=None, alias="from"),
     date_to: str | None = Query(default=None, alias="to"),
 ) -> dict[str, Any]:
     start, end = parse_date_range(date_from, date_to)
+    impact = get_safi_impact(
+        space_id,
+        start,
+        end,
+        service_id=service_id,
+    )
     return success(
         {
             "period": {"from": start, "to": end},
-            "spaces": get_safi_impact(space_id, start, end),
+            "service_id": service_id,
+            "services" if service_id is not None else "spaces": impact,
         }
     )

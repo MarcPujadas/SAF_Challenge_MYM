@@ -16,7 +16,9 @@ router = APIRouter(prefix="/api/v1")
 
 class ReservationCreate(BaseModel):
     user_id: str
-    space_id: str
+    space_id: str | None = None
+    service_id: str | None = None
+    participants_count: int | None = None
     date: str
     start: str
     end: str
@@ -31,6 +33,8 @@ def create_reservation(payload: ReservationCreate) -> dict[str, Any]:
             payload.date,
             payload.start,
             payload.end,
+            service_id=payload.service_id,
+            participants_count=payload.participants_count,
         )
     )
 

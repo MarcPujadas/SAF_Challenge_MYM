@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.common import success
 from app.services.catalog_service import (
     get_current_user,
+    get_service_resources,
     list_services,
     list_spaces,
 )
@@ -24,3 +25,8 @@ def get_spaces():
 @router.get("/services")
 def get_services():
     return success(list_services())
+
+
+@router.get("/services/{service_id}/spaces")
+def get_service_spaces(service_id: str):
+    return success(get_service_resources(service_id))

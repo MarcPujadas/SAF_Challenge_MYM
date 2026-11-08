@@ -1,167 +1,70 @@
-import pandas as pd
-import re
-import unicodedata
+from pathlib import Path
 
-FILE_PATH = "data/raw/saf-espais-2026-equips.xlsx"
+import pandas as pd
+
+from app.config.resource_mapping import (
+    documented_subdivisions,
+    normalize_resource_name,
+    resolve_resource_mapping,
+)
+
+
+BASE_DIR = Path(__file__).resolve().parents[1]
+FILE_PATH = BASE_DIR / "data" / "local" / "saf-espais-2026-equips.xlsx"
 
 
 def normalize_text(text):
-    text = str(text).lower()
+    """Compatibility alias for older script callers."""
+    return normalize_resource_name(text)
 
-    text = unicodedata.normalize("NFD", text)
-    text = "".join(
-        c for c in text
-        if unicodedata.category(c) != "Mn"
-    )
 
-    text = re.sub(r"\([^)]*\)", "", text)
-    text = re.sub(r"\s+", " ", text)
-
-    return text.strip()
+def build_mapping(resource):
+    return resolve_resource_mapping(resource).as_dict()
 
 
 def detect_space_id(resource):
-    normalized = normalize_text(resource)
+    """Compatibility helper: unknown resources remain unmapped, not discarded."""
+    result = resolve_resource_mapping(resource)
+    return result.space_id if result.mapping_status == "mapped" else None
 
-    # FITNESS
-    if "sala fitnes" in normalized:
-        return "sala-fitnes-sala-cardio"
 
-    # PADEL
-    if "padel/padbol" in normalized:
-        match = re.search(r"pista\s+(\d+)", normalized)
+def main():
+    if not FILE_PATH.exists():
+        raise FileNotFoundError(
+            f"No s'ha trobat el dataset privat: {FILE_PATH}"
+        )
 
-        if match:
-            number = match.group(1)
-            return f"pistes-de-padel-pista-{number}"
+    workbook = pd.ExcelFile(FILE_PATH)
+    resource_frames = []
+    for sheet_name in workbook.sheet_names:
+        frame = pd.read_excel(workbook, sheet_name=sheet_name)
+        if "Recurs" in frame.columns:
+            resource_frames.append(frame["Recurs"])
 
-    # TENNIS
-    if "tennis/pikleball" in normalized:
-        match = re.search(r"pista\s+(\d+)", normalized)
+    if not resource_frames:
+        raise ValueError("No s'ha trobat cap columna 'Recurs' al workbook.")
 
-        if match:
-            number = match.group(1)
-            return f"tennis-tennis-{number}"
+    resources = pd.concat(resource_frames, ignore_index=True).dropna().unique()
+    mapped = []
+    for raw_resource in sorted(resources, key=str):
+        mapped.append(build_mapping(raw_resource))
 
-    # ESQUAIX
-    if "esquaix/c.soccer" in normalized:
-        match = re.search(r"pista\s+(\d+)", normalized)
-
-        if match:
-            number = match.group(1)
-            return f"esquaix-esquaix-{number}"
-
-    # FUTBOL 7
-    if "futbol 7" in normalized:
-        match = re.search(r"camp\s+(\d+)", normalized)
-
-        if match:
-            number = match.group(1)
-            return f"futbol-7-camp-{number}"
-
-    # PISCINA 25 M - CARRERS
-    if "p. 25m" in normalized:
-        match = re.search(r"c/(\d+)", normalized)
-
-        if match:
-            number = match.group(1)
-            return f"piscina-25-metres-carrer-{number}"
-
-    # PISCINA 16 M
-    if "p. 16m" in normalized:
-        return "piscina-de-16-metres"
-
-    # ROCÒDROM
-    if "rocodrom exterior" in normalized:
-        return "rocodrom-exterior"
-
-    if "rocodrom interior" in normalized:
-        return "rocodrom-interior"
-
-    # BARBELL
-    if "espai barbell" in normalized:
-        return "espai-barbell"
-
-    # CAL·LISTÈNIA
-    if "cal.listenia" in normalized or "calistenia" in normalized:
-        return "zona-cal-listenia"
-
-    # VÒLEI PLATJA
-    if "volei platja" in normalized:
-        return "voleibol-platja"
-
-    # BÀSQUET EXTERIOR
-    if "basquet exterior" in normalized or "basquet - pista exterior" in normalized:
-        return "basquet-exterior"
-
-    # FUTBOL SALA EXTERIOR
-    if "futbol sala 1" in normalized:
-        return "futbol-sala-extrerior"
-
-    # ACTIVITATS DIRIGIDES
-    if "sala 1- ritmes" in normalized:
-        return "sales-activitats-dirigides-sala-1"
-
-    if "sala 2- ritmes" in normalized:
-        return "sales-activitats-dirigides-sala-2"
-
-    if "sala 3- zen" in normalized:
-        return "sales-activitats-dirigides-sala-3"
-
-    # BOXTRAINING
-    if "sala 6- boxtraining" in normalized:
-        return "sala-boxtraining-esquaix-1"
-
-    return None
+    mapping_frame = pd.DataFrame(mapped)
+    print("RESUM DE MAPPINGS")
+    print(mapping_frame["mapping_status"].value_counts().to_string())
+    print()
+    print("RECURSOS PER REVISAR")
+    for item in mapped:
+        if item["mapping_status"] != "mapped":
+            print(
+                f"{item['mapping_status']}: "
+                f"{item['raw_resource_name']}"
+            )
+    print()
+    print("SUBDIVISIONS EXPLÍCITES")
+    for item in documented_subdivisions():
+        print(item)
 
 
 if __name__ == "__main__":
-    df = pd.read_excel(
-        FILE_PATH,
-        sheet_name="Reserves"
-    )
-
-    resources = (
-        df["Recurs"]
-        .dropna()
-        .drop_duplicates()
-        .sort_values()
-    )
-
-    mapped = []
-    unmapped = []
-
-    for resource in resources:
-        space_id = detect_space_id(resource)
-
-        if space_id:
-            mapped.append(
-                {
-                    "resource": resource,
-                    "space_id": space_id
-                }
-            )
-        else:
-            unmapped.append(resource)
-
-    print("=" * 70)
-    print("RECURSOS MAPEJATS")
-    print("=" * 70)
-
-    for item in mapped:
-        print(
-            f"{item['resource']} "
-            f"--> {item['space_id']}"
-        )
-
-    print("\n")
-    print("=" * 70)
-    print("RECURSOS ENCARA NO MAPEJATS")
-    print("=" * 70)
-
-    for resource in unmapped:
-        print(resource)
-
-    print("\nRESUM")
-    print("Mapejats:", len(mapped))
-    print("No mapejats:", len(unmapped))
+    main()

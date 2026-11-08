@@ -301,12 +301,17 @@ def get_safi_impact(
     space_id: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
+    *,
+    service_id: str | None = None,
 ) -> list[dict]:
     conditions = []
     params = []
     if space_id is not None:
         conditions.append("r.space_id = ?")
         params.append(space_id)
+    if service_id is not None:
+        conditions.append("r.service_id = ?")
+        params.append(service_id)
     if date_from is not None:
         conditions.append("r.date >= ?")
         params.append(date_from)
@@ -324,6 +329,7 @@ def get_safi_impact(
             f"""
             SELECT
                 r.space_id,
+                r.service_id,
                 r.requested_start,
                 r.recommended_start,
                 r.requested_score,
@@ -333,21 +339,29 @@ def get_safi_impact(
             LEFT JOIN recommendation_actions a
                 ON a.recommendation_id = r.id
             {where_clause}
-            ORDER BY r.space_id, r.created_at, r.id
+            ORDER BY r.service_id, r.space_id, r.created_at, r.id
             """,
             params,
         ).fetchall()
 
-    grouped: dict[str, list] = {}
+    grouped: dict[str | None, list] = {}
     for recommendation in recommendations:
-        grouped.setdefault(recommendation["space_id"], []).append(
-            recommendation
+        key = (
+            recommendation["service_id"]
+            if service_id is not None
+            else recommendation["space_id"]
         )
+        grouped.setdefault(key, []).append(recommendation)
     if space_id is not None:
         grouped.setdefault(space_id, [])
+    if service_id is not None:
+        grouped.setdefault(service_id, [])
 
     spaces = []
-    for current_space_id, space_recommendations in sorted(grouped.items()):
+    for current_space_id, space_recommendations in sorted(
+        grouped.items(),
+        key=lambda item: item[0] or "",
+    ):
         total = len(space_recommendations)
         accepted = sum(
             recommendation["action"] == "accepted"
@@ -378,43 +392,45 @@ def get_safi_impact(
                 comparable_reductions.append(
                     (requested_score, recommended_score)
                 )
-        spaces.append(
-            {
-                "space_id": current_space_id,
-                "recommendations_generated": total,
-                "accepted": accepted,
-                "ignored": ignored,
-                "without_action": total - decided,
-                "decision_rate": (
-                    round(decided / total * 100, 1)
-                    if total
-                    else None
-                ),
-                "acceptance_rate": (
-                    round(accepted / decided * 100, 1)
-                    if decided
-                    else None
-                ),
-                "accepted_high_to_lower_recommendations": sum(
-                    requested_score >= 65
-                    for requested_score, _ in comparable_reductions
-                ),
-                "accepted_recommendations_with_score_reduction": len(
-                    comparable_reductions
-                ),
-                "average_saturation_reduction": (
-                    round(
-                        sum(
-                            requested_score - recommended_score
-                            for requested_score, recommended_score
-                            in comparable_reductions
-                        )
-                        / len(comparable_reductions),
-                        1,
+        item = {
+            "recommendations_generated": total,
+            "accepted": accepted,
+            "ignored": ignored,
+            "without_action": total - decided,
+            "decision_rate": (
+                round(decided / total * 100, 1)
+                if total
+                else None
+            ),
+            "acceptance_rate": (
+                round(accepted / decided * 100, 1)
+                if decided
+                else None
+            ),
+            "accepted_high_to_lower_recommendations": sum(
+                requested_score >= 65
+                for requested_score, _ in comparable_reductions
+            ),
+            "accepted_recommendations_with_score_reduction": len(
+                comparable_reductions
+            ),
+            "average_saturation_reduction": (
+                round(
+                    sum(
+                        requested_score - recommended_score
+                        for requested_score, recommended_score
+                        in comparable_reductions
                     )
-                    if comparable_reductions
-                    else None
-                ),
-            }
-        )
+                    / len(comparable_reductions),
+                    1,
+                )
+                if comparable_reductions
+                else None
+            ),
+        }
+        if service_id is not None:
+            item["service_id"] = current_space_id
+        else:
+            item["space_id"] = current_space_id
+        spaces.append(item)
     return spaces

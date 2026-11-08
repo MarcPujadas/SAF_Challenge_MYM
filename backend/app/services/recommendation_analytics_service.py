@@ -7,6 +7,8 @@ def get_recommendation_stats(
     space_id: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
+    *,
+    service_id: str | None = None,
 ) -> dict:
     conditions = []
     params = []
@@ -16,6 +18,9 @@ def get_recommendation_stats(
             "r.space_id = ?"
         )
         params.append(space_id)
+    if service_id is not None:
+        conditions.append("r.service_id = ?")
+        params.append(service_id)
 
     if date_from is not None:
         conditions.append(
