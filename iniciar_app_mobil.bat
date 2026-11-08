@@ -15,7 +15,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%scripts\wait_for_back
 if errorlevel 1 (echo ERROR backend.& pause& exit /b 1)
 powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%scripts\verificar_api.ps1"
 if errorlevel 1 (echo ERROR API.& pause& exit /b 1)
-for /f "usebackq delims=" %%I in (`powershell -NoProfile -Command "$c=Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notmatch '^(127\\.|169\\.)' -and $_.InterfaceAlias -notmatch 'Loopback|Virtual|vEthernet|WSL|Docker' } | Sort-Object InterfaceMetric; $c | Select-Object -First 1 -ExpandProperty IPAddress"`) do set "SAFI_PC_IP=%%I"
+for /f "usebackq delims=" %%I in (`powershell -NoProfile -Command "$c=Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notmatch '^(127\.|169\.)' -and $_.InterfaceAlias -notmatch 'Loopback|Virtual|vEthernet|WSL|Docker' } | Sort-Object InterfaceMetric; $c | Select-Object -First 1 -ExpandProperty IPAddress"`) do set "SAFI_PC_IP=%%I"
 if not defined SAFI_PC_IP (
  echo No es pot detectar IP de Windows.
  set /p "SAFI_PC_IP=Escriu la IP IPv4 local del PC (ipconfig): "
