@@ -14,7 +14,7 @@ if not exist "node_modules\react-native-web" (
   if errorlevel 1 (popd& echo Error instal-lant Expo Web.& pause& exit /b 1)
 )
 popd
-powershell -NoProfile -Command "try {$r=Invoke-RestMethod 'http://127.0.0.1:8000/health' -TimeoutSec 2; if($r.status -ne 'ok') {exit 1}} catch {exit 1}"
+powershell -NoProfile -Command "try {$r=Invoke-RestMethod 'http://127.0.0.1:8000/health' -TimeoutSec 2; if($r.data.status -ne 'ok') {exit 1}} catch {exit 1}"
 if errorlevel 1 start "SAFi Backend" /D "%ROOT%backend" cmd /k ".venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000"
 echo Obrint aplicacio SAFi en navegador (Expo Web)...
 start "SAFi App" /D "%ROOT%frontend" cmd /k "npx expo start --web --clear"

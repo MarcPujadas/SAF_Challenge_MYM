@@ -44,14 +44,19 @@ export async function request<T>(
   const url = baseUrl() + path + buildQuery(options.query);
 
   let response: Response;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
   try {
     response = await fetch(url, {
+      signal: controller.signal,
       method,
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
     });
   } catch (err) {
     throw new ApiError('NETWORK_ERROR', `No s'ha pogut connectar amb el servidor: ${String(err)}`);
+  } finally {
+    clearTimeout(timeout);
   }
 
   let json: ApiEnvelope<T>;
