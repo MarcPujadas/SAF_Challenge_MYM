@@ -1,6 +1,7 @@
 import { ApiError } from './client';
 
-// Missatge curt per a l'usuari a partir d'un error de l'API.
+// Show the real cause when the connection or server fails. Do not mask HTTP
+// errors, incorrect local URLs, and CORS as the same generic message.
 export function errorMessage(err: unknown): string {
   if (err instanceof ApiError) {
     switch (err.code) {
@@ -29,8 +30,10 @@ export function errorMessage(err: unknown): string {
       case 'RESERVATION_ALREADY_CANCELLED':
         return 'Aquesta reserva ja estava cancel·lada.';
       case 'NETWORK_ERROR':
-        return 'No hi ha connexió amb el servidor. Torna-ho a provar.';
+      case 'SERVER_ERROR':
+        return err.message;
     }
+    return err.message;
   }
-  return 'Alguna cosa ha anat malament. Torna-ho a provar.';
+  return err instanceof Error ? err.message : 'Alguna cosa ha anat malament. Torna-ho a provar.';
 }
