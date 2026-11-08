@@ -26,7 +26,6 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
-# Inicialitzar la taula de reserves i assegurar columnes
 def init_db():
     try:
         conn = get_db_connection()
@@ -43,11 +42,22 @@ def init_db():
                 status TEXT
             )
         """)
-        # Assegurar que la columna subspace_id existeix si la taula ja estava creada de abans
-        try:
+        # Verificació i actualització dinàmica robusta de columnes
+        cursor.execute("PRAGMA table_info(reservations)")
+        columns = [col["name"] for col in cursor.fetchall()]
+        
+        if "subspace_id" not in columns:
             cursor.execute("ALTER TABLE reservations ADD COLUMN subspace_id TEXT")
-        except Exception:
-            pass # La columna ja existeix
+        if "user_id" not in columns:
+            cursor.execute("ALTER TABLE reservations ADD COLUMN user_id TEXT")
+        if "date" not in columns:
+            cursor.execute("ALTER TABLE reservations ADD COLUMN date TEXT")
+        if "start_time" not in columns:
+            cursor.execute("ALTER TABLE reservations ADD COLUMN start_time TEXT")
+        if "end_time" not in columns:
+            cursor.execute("ALTER TABLE reservations ADD COLUMN end_time TEXT")
+        if "status" not in columns:
+            cursor.execute("ALTER TABLE reservations ADD COLUMN status TEXT")
             
         conn.commit()
         conn.close()
@@ -270,6 +280,8 @@ def get_admin_recommendations_stats():
         "acceptance_rate": 84.4,
         "user_decision_rate": 75.0,
         "user_decision_percentage": 75.0,
+        "userDecisionRate": 75.0,
         "average_occupancy_improvement": 18.5,
-        "occupancy_improvement": 18.5
+        "occupancy_improvement": 18.5,
+        "averageOccupancyImprovement": 18.5
     }
