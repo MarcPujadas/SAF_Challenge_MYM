@@ -208,9 +208,12 @@ actius.
 
 ## GET /services/{service_id}/spaces
 
-Retorna els subespais actius i les seves capacitats configurades. Els
-recursos virtuals sense espai físic reservable no es presenten com a
-reservables.
+Retorna els subespais actius i les seves capacitats configurades. Un recurs
+amb mapping virtual només és reservable quan la inicialització ha creat el
+seu espai operatiu; `is_virtual: true` conserva la traçabilitat que la seva
+identitat prové del mapping SAF i no d'una fila del full d'espais.
+Pàdel Pista 2 i les dues meitats documentades del Camp 4 utilitzen aquesta
+representació d'una unitat reservable.
 
 ```json
 {
@@ -442,7 +445,10 @@ El heatmap per servei només agrega serveis amb forecast validat; els altres
 retornen `occupancy_score: null`, `occupancy_level: "unknown"` i
 `unavailable_reason: "aggregated_forecast_not_validated"`. No s'utilitza
 cap subespai com a proxy. Les respostes de servei també inclouen
-`occupancy_ratio` quan existeix, `samples` i la font històrica.
+`occupancy_ratio` quan existeix, `samples` i la font històrica. Fitness pot
+utilitzar `historical_occupancy.csv` quan no hi ha mètriques de persones
+vàlides a `historical_usage`; en aquest cas manté l'índex històric relatiu,
+`occupancy_ratio` és `null` i `source` identifica `historical_occupancy.csv`.
 
 Els filtres permeten limitar les dades per espai i període. `from` i
 `to` són inclusius; si s'omet un dels dos, es consulta només la data
@@ -735,6 +741,11 @@ Crea una reserva real i la guarda a SQLite. El payload antic basat en
 `space_id` continua suportat. Amb `service_id` i `space_id: null`, el
 backend assigna el primer subespai disponible amb ordre estable. Si
 s'envien tots dos, valida que el subespai pertanyi al servei.
+
+Al futbol, `futbol-7-camp-4` entra en conflicte amb
+`futbol-7-camp-4-1` i `futbol-7-camp-4-2`: reservar el camp complet impedeix
+reservar qualsevol meitat, mentre que reservar una meitat permet reservar
+l'altra. Les dues meitats també entren en conflicte amb el camp complet.
 
 ### Request
 

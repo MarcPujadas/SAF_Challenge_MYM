@@ -19,9 +19,25 @@ def seed_service_spaces(connection: sqlite3.Connection) -> None:
             "SELECT capacity FROM spaces WHERE id = ?",
             (resource.space_id,),
         ).fetchone()
-        is_virtual = space is None
+        is_virtual = (
+            space is None or resource.materialize_as_reservable_space
+        )
         if is_virtual and not resource.allow_virtual:
             continue
+        if is_virtual and resource.materialize_as_reservable_space:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO spaces (
+                    id, name, type, capacity, reservable
+                )
+                VALUES (?, ?, 'court', 1, 1)
+                """,
+                (resource.space_id, resource.label),
+            )
+            space = connection.execute(
+                "SELECT capacity FROM spaces WHERE id = ?",
+                (resource.space_id,),
+            ).fetchone()
 
         person_capacity = (
             int(space["capacity"])

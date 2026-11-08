@@ -213,6 +213,10 @@ def _validated_service_data(service_id, weekday=None):
                 AND usage.start_time IS NOT NULL
                 AND source.source_type != 'application_operational'
                 AND (
+                    usage.service_id != 'fitness'
+                    OR usage.source_id = 'saf_reserves_2026'
+                )
+                AND (
                     source.checksum IS NULL
                     OR source.checksum = usage.source_checksum
                 )
@@ -273,6 +277,92 @@ def _score_service_slot(slot_data):
     }
 
 
+def _fitness_legacy_statistics(weekday):
+    history = prepare_space_data(
+        SPACE_ID_BY_SERVICE_ID["fitness"],
+        weekday,
+    )
+    statistics = calculate_slot_statistics(history)
+    return add_occupancy_scores(statistics)
+
+
+def _fitness_legacy_score(weekday, start_time, statistics=None):
+    if statistics is None:
+        statistics = _fitness_legacy_statistics(weekday)
+    selected = statistics[statistics["start_time"] == start_time]
+    if selected.empty:
+        return {
+            "occupancy_score": None,
+            "occupancy_level": "unknown",
+            "occupancy_ratio": None,
+            "average_reservations": None,
+            "samples": 0,
+            "unavailable_reason": "historical_data_unavailable",
+        }
+    row = selected.iloc[0]
+    score = int(row["occupancy_score"])
+    return {
+        "occupancy_score": score,
+        "occupancy_level": occupancy_level(score),
+        "occupancy_ratio": None,
+        "average_reservations": round(
+            float(row["average_reservations"]),
+            2,
+        ),
+        "samples": int(row["samples"]),
+    }
+
+
+def _fitness_legacy_heatmap(date_from=None, date_to=None):
+    history = load_historical_data()
+    fitness_history = history[
+        history["space_id"] == SPACE_ID_BY_SERVICE_ID["fitness"]
+    ].copy()
+    if fitness_history.empty and date_from is None and date_to is None:
+        return []
+    if date_from is None and date_to is None:
+        start_date = date_type.fromisoformat(
+            str(fitness_history["date"].min())
+        )
+        end_date = date_type.fromisoformat(
+            str(fitness_history["date"].max())
+        )
+    else:
+        start_date = date_type.fromisoformat(date_from or date_to)
+        end_date = date_type.fromisoformat(date_to or date_from)
+
+    statistics_by_weekday = {}
+    days = []
+    current_date = start_date
+    while current_date <= end_date:
+        weekday = current_date.weekday()
+        if weekday not in statistics_by_weekday:
+            statistics_by_weekday[weekday] = _fitness_legacy_statistics(
+                weekday
+            )
+        statistics = statistics_by_weekday[weekday]
+        slots = []
+        valid_slots = get_valid_slots(
+            SPACE_ID_BY_SERVICE_ID["fitness"],
+            weekday,
+            statistics["start_time"].unique(),
+        )
+        for hour in valid_slots:
+            slots.append(
+                {
+                    "hour": hour,
+                    **_fitness_legacy_score(
+                        weekday,
+                        hour,
+                        statistics,
+                    ),
+                }
+            )
+        days.append({"date": current_date.isoformat(), "slots": slots})
+        current_date = date_type.fromordinal(current_date.toordinal() + 1)
+    return days
+
+
 def get_service_historical_occupancy(
     service_id,
     weekday,
@@ -324,6 +414,23 @@ def get_service_historical_occupancy(
     slot_data = service_data[
         service_data["start_time"] == start_time
     ]
+    if service_id == "fitness" and slot_data.empty:
+        legacy_statistics = _fitness_legacy_statistics(weekday)
+        legacy_score = _fitness_legacy_score(
+            weekday,
+            start_time,
+            legacy_statistics,
+        )
+        if legacy_score["occupancy_score"] is not None:
+            return {
+                "service_id": service_id,
+                "weekday": int(weekday),
+                "requested_start": start_time,
+                "start_time": start_time,
+                **legacy_score,
+                "aggregate": True,
+                "source": "historical_occupancy.csv",
+            }
     score = _score_service_slot(slot_data)
     return {
         "service_id": service_id,
@@ -383,6 +490,14 @@ def get_service_historical_heatmap(
 
     resource_id = _service_forecast_resource(service_id)
     service_data = _validated_service_data(service_id)
+    if service_id == "fitness" and service_data.empty:
+        return {
+            "service_id": service_id,
+            "aggregate": True,
+            "days": _fitness_legacy_heatmap(date_from, date_to),
+            "source": "historical_occupancy.csv",
+            "occupancy_ratio_available": False,
+        }
     if date_from is None and date_to is None:
         if service_data.empty:
             dates = []
@@ -530,15 +645,28 @@ def get_service_best_alternative(
             "unavailable_reason": "aggregated_forecast_not_validated",
         }
     service_data = _validated_service_data(service_id, weekday)
+    requested_data = service_data[
+        service_data["start_time"] == preferred_start
+    ]
+    if service_id == "fitness" and (
+        service_data.empty or requested_data.empty
+    ):
+        return {
+            "service_id": service_id,
+            "aggregate": True,
+            "alternative": get_best_alternative(
+                SPACE_ID_BY_SERVICE_ID["fitness"],
+                weekday,
+                preferred_start,
+            ),
+            "source": "historical_occupancy.csv",
+        }
     if service_data.empty:
         return {
             "service_id": service_id,
             "aggregate": True,
             "alternative": None,
         }
-    requested_data = service_data[
-        service_data["start_time"] == preferred_start
-    ]
     if requested_data.empty:
         return {
             "service_id": service_id,
@@ -645,6 +773,28 @@ def get_service_quietest_slot(
             "unavailable_reason": "aggregated_forecast_not_validated",
         }
     resource_data = _validated_service_data(service_id, weekday)
+    if service_id == "fitness" and resource_data.empty:
+        statistics = _fitness_legacy_statistics(weekday)
+        if statistics.empty:
+            quietest = None
+        else:
+            row = statistics.sort_values(
+                ["occupancy_score", "start_time"]
+            ).iloc[0]
+            quietest = {
+                "start": row["start_time"],
+                "occupancy_score": int(row["occupancy_score"]),
+                "occupancy_level": occupancy_level(
+                    int(row["occupancy_score"])
+                ),
+                "samples": int(row["samples"]),
+            }
+        return {
+            "service_id": service_id,
+            "aggregate": True,
+            "slot": quietest,
+            "source": "historical_occupancy.csv",
+        }
     if resource_data.empty:
         quietest = None
     else:

@@ -163,6 +163,14 @@ def resolve_resource_mapping(raw_resource_name: object) -> ResourceMappingResult
         if raw_resource_name is None
         else str(raw_resource_name)
     )
+    explicit_half_marker = bool(
+        raw_name
+        and re.search(
+            r"\b(?:1\s*/\s*2|mitja|mig|half)\b",
+            raw_name,
+            re.IGNORECASE,
+        )
+    )
 
     if not normalized:
         return ResourceMappingResult(
@@ -177,12 +185,17 @@ def resolve_resource_mapping(raw_resource_name: object) -> ResourceMappingResult
         normalized_id = normalize_resource_name(raw_name)
         for (service_id, space_id), resource in SERVICE_SPACE_BY_KEY.items():
             if normalize_resource_name(space_id) == normalized_id:
+                capacity_share = (
+                    0.5
+                    if service_id == "football" and explicit_half_marker
+                    else 1.0
+                )
                 return ResourceMappingResult(
                     service_id,
                     space_id,
                     "mapped",
                     resource.capacity_mode,
-                    1.0,
+                    capacity_share,
                     raw_name,
                 )
 
@@ -191,12 +204,31 @@ def resolve_resource_mapping(raw_resource_name: object) -> ResourceMappingResult
         r"(?:\s+(?P<subdivision>[12]))?\b",
         normalized,
     )
-    explicit_half = bool(
+    explicit_half = explicit_half_marker or bool(
         re.search(r"\b(?:mitja|mig|half)\b", normalized)
         or re.search(r"\b\d+\s+1\s+2\s+camp\b", normalized)
         or re.search(r"\bcamp\s+\d+\s+[12]\s+1\s+2\b", normalized)
     )
     if football_parent is not None and explicit_half:
+        subdivision = football_parent.group("subdivision")
+        if subdivision is not None:
+            mapped_half = _mapping_for(
+                "football",
+                (
+                    f"futbol-7-camp-{football_parent.group('number')}-"
+                    f"{subdivision}"
+                ),
+                raw_resource_name,
+            )
+            if mapped_half is not None:
+                return ResourceMappingResult(
+                    mapped_half.service_id,
+                    mapped_half.space_id,
+                    mapped_half.mapping_status,
+                    mapped_half.capacity_mode,
+                    0.5,
+                    raw_name,
+                )
         mapped = _mapping_for(
             "football",
             f"futbol-7-camp-{football_parent.group('number')}",
@@ -243,5 +275,13 @@ def resolve_resource_mapping(raw_resource_name: object) -> ResourceMappingResult
 
 
 def documented_subdivisions() -> list[dict[str, str]]:
-    """Return only explicit resource subdivisions; none are validated yet."""
-    return []
+    return [
+        {
+            "service_id": "football",
+            "parent_space_id": "futbol-7-camp-4",
+            "space_id": f"futbol-7-camp-4-{number}",
+            "label": f"Camp 4.{number}",
+            "capacity_share": "0.5",
+        }
+        for number in (1, 2)
+    ]

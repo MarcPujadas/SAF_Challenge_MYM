@@ -6,6 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.common import ApiError
+from app.config.service_spaces import conflicting_space_ids
 from app.database.database import get_connection
 from app.services.validation import WEEKDAYS_CA
 from app.services.schedule_service import (
@@ -25,17 +26,21 @@ def count_confirmed_reservations_for_slot(
     *,
     connection=None,
 ) -> int:
+    blocking_space_ids = (space_id, *conflicting_space_ids(space_id))
+    placeholders = ", ".join("?" for _ in blocking_space_ids)
     owns_connection = connection is None
     if owns_connection:
         connection = get_connection()
     try:
         reservations = connection.execute(
-            """
+            f"""
             SELECT start, end
             FROM reservations
-            WHERE space_id = ? AND date = ? AND status = 'confirmed'
+            WHERE space_id IN ({placeholders})
+                AND date = ?
+                AND status = 'confirmed'
             """,
-            (space_id, date_value),
+            (*blocking_space_ids, date_value),
         ).fetchall()
     finally:
         if owns_connection:
@@ -272,15 +277,23 @@ def create_reservation(
                 if not bool(candidate["reservable"]):
                     continue
 
+                blocking_space_ids = (
+                    candidate["id"],
+                    *conflicting_space_ids(candidate["id"]),
+                )
+                placeholders = ", ".join("?" for _ in blocking_space_ids)
                 reservations = connection.execute(
-                    """
+                    f"""
                     SELECT start, end, participants_count
                     FROM reservations
-                    WHERE space_id = ?
+                    WHERE space_id IN ({placeholders})
                         AND date = ?
                         AND status = 'confirmed'
                     """,
-                    (candidate["id"], reservation_date.isoformat()),
+                    (
+                        *blocking_space_ids,
+                        reservation_date.isoformat(),
+                    ),
                 ).fetchall()
                 overlapping = [
                     row

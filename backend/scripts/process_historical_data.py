@@ -262,15 +262,18 @@ def normalize_guided_activity_rows(
                 )
             if existing_space_id is not None:
                 mapping = replace(mapping, space_id=existing_space_id)
-        if mapping.service_id is None:
-            mapping = mapping.__class__(
-                "guided-activities",
-                None,
-                "manual_review",
-                "unknown",
-                None,
-                raw_resource_name,
-            )
+        location_is_mapped = (
+            mapping.service_id == "guided-activities"
+            and mapping.mapping_status == "mapped"
+        )
+        mapping = replace(
+            mapping,
+            service_id="guided-activities",
+            mapping_status=(
+                "mapped" if location_is_mapped else "manual_review"
+            ),
+            capacity_mode="people",
+        )
         date = _date_value(row["date"])
         people_count, _ = _numeric_count(row["peak_enrolled"])
         capacity_people, _ = _numeric_count(row["capacity"])
@@ -305,16 +308,21 @@ def normalize_guided_activity_rows(
                 "capacity_people_snapshot": capacity_people,
                 "capacity_units_snapshot": None,
                 "occupancy_ratio": (
-                    float(occupancy_percent) / 100
+                    round(
+                        float(people_count) / float(capacity_people),
+                        4,
+                    )
+                    if (
+                        people_count is not None
+                        and capacity_people is not None
+                        and float(capacity_people) > 0
+                    )
+                    else float(occupancy_percent) / 100
                     if occupancy_percent is not None
                     else None
                 ),
                 "raw_resource_name": raw_resource_name,
-                "capacity_mode": (
-                    mapping.capacity_mode
-                    if mapping.mapping_status == "mapped"
-                    else "people"
-                ),
+                "capacity_mode": "people",
                 "mapping_status": mapping.mapping_status,
                 "capacity_share": mapping.capacity_share,
             }
