@@ -1,8 +1,9 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import HeatmapGrid, { forecastCell, serviceSlotCell } from '../components/HeatmapGrid';
+import SafiFloatingCard from '../components/safi/SafiFloatingCard';
 import type { CellValue, HeatmapMode } from '../components/HeatmapGrid';
 import { Button, Card, Chip, EmptyState, ErrorState, LoadingState, ScreenContainer } from '../components/ui';
 import type { RootStackParamList } from '../navigation/types';
@@ -76,7 +77,9 @@ export default function ReservaScreen({ navigation, route }: Props) {
   const [adviceLoading, setAdviceLoading] = useState(false);
   const [adviceFailed, setAdviceFailed] = useState(false);
   const [adviceNoData, setAdviceNoData] = useState<string | null>(null);
-  const [adviceDismissed, setAdviceDismissed] = useState(false);
+  // Targeta flotant descartada: clau = id de recomanacio (o servei+data+franja). Es reinicia en canviar de franja o servei.
+  const [dismissedKey, setDismissedKey] = useState<string | null>(null);
+  const [floatingH, setFloatingH] = useState(0); // alcada ocupada per la targeta flotant a baix
 
   // Pas 5: confirmar
   const [submitting, setSubmitting] = useState(false);
@@ -189,7 +192,7 @@ export default function ReservaScreen({ navigation, route }: Props) {
     setAdviceLoading(false);
     setAdviceFailed(false);
     setAdviceNoData(null);
-    setAdviceDismissed(false);
+    setDismissedKey(null);
     setSubmitError(null);
     setMiniWeek(null);
     setMiniForecast(null);
@@ -207,7 +210,7 @@ export default function ReservaScreen({ navigation, route }: Props) {
 
     adviceReq.current++;
     setService(s);
-    setAdviceDismissed(false);
+    setDismissedKey(null);
     setDate(null);
     setSlot(null);
     setAdvice(null);
@@ -230,7 +233,7 @@ export default function ReservaScreen({ navigation, route }: Props) {
   async function pickSlot(s: ServiceWeekSlot, svc: Service | null = service, day: string | null = date) {
     if (!svc || !day) return;
     const id = ++adviceReq.current;
-    setAdviceDismissed(false);
+    setDismissedKey(null);
     setSlot(s);
     setAdvice(null);
     setAdviceFailed(false);
@@ -357,15 +360,17 @@ export default function ReservaScreen({ navigation, route }: Props) {
           ?.slots.find((x) => x.start === recommended.start && x.available)
       : undefined;
 
-  // La seccio SAFi nomes apareix si hi ha alguna cosa de SAFi per mostrar.
-  const hasSafi =
-    adviceLoading ||
-    (!!advice && !adviceDismissed) ||
-    (!!adviceNoData && !adviceDismissed) ||
-    adviceFailed;
+  // Targeta flotant de SAFi: mateixes dades de sempre (recomanacio o missatge sense dades).
+  // Si no hi ha previsio valida no hi ha ni recomanacio ni missatge, i no es mostra res.
+  const floatingMessage = advice?.message ?? adviceNoData ?? null;
+  const cardKey =
+    advice?.recommendation_id ??
+    (service && date && slot ? `${service.id}|${date}|${slot.start}` : null);
+  const floatingVisible = !!slot && !!floatingMessage && cardKey !== dismissedKey;
 
   return (
-    <ScreenContainer>
+    <View style={styles.root}>
+    <ScreenContainer bottomPadding={floatingVisible ? floatingH : 0}>
       {/* 1. Servei */}
       <Text style={styles.step}>1. Servei</Text>
       {servicesLoading && <LoadingState lines={2} />}
@@ -486,55 +491,12 @@ export default function ReservaScreen({ navigation, route }: Props) {
       {/* 3. Avis SAFi + 4. Confirmar */}
       {slot && (
         <>
-          {hasSafi && <Text style={styles.step}>3. SAFi</Text>}
           {adviceLoading && <LoadingState lines={2} />}
-          {advice && !adviceDismissed && (
-            <View style={styles.safiBox}>
-              <Pressable
-                style={styles.dismiss}
-                hitSlop={10}
-                accessibilityLabel="Tancar l'avís de SAFi"
-                onPress={() => setAdviceDismissed(true)}
-              >
-                <Text style={styles.dismissText}>✕</Text>
-              </Pressable>
-              <Text style={styles.safiTitle}>SAFi</Text>
-              <Text style={styles.safiText}>{advice.message}</Text>
-              {altSlot && (
-                <Button
-                  label={`Canviar a ${altSlot.start}`}
-                  disabled={submitting}
-                  style={styles.altButton}
-                  onPress={() => {
-                    sendRecommendationAction(advice, 'accepted');
-                    setSlot(altSlot);
-                    setAdvice(null);
-                    setAdviceNoData(null);
-                    setAdviceFailed(false);
-                  }}
-                />
-              )}
-            </View>
-          )}
-          {adviceNoData && !adviceDismissed && (
-            <View style={styles.safiBox}>
-              <Pressable
-                style={styles.dismiss}
-                hitSlop={10}
-                accessibilityLabel="Tancar l'avís de SAFi"
-                onPress={() => setAdviceDismissed(true)}
-              >
-                <Text style={styles.dismissText}>✕</Text>
-              </Pressable>
-              <Text style={styles.safiTitle}>SAFi</Text>
-              <Text style={styles.safiText}>{adviceNoData}</Text>
-            </View>
-          )}
           {adviceFailed && (
             <Text style={styles.muted}>SAFi no està disponible ara mateix. Pots confirmar igualment.</Text>
           )}
 
-          <Text style={styles.step}>{hasSafi ? '4. Confirmar' : '3. Confirmar'}</Text>
+          <Text style={styles.step}>3. Confirmar</Text>
           {submitError && (
             <View style={styles.errorBox} accessibilityRole="alert">
               <Text style={styles.error}>{submitError}</Text>
@@ -549,10 +511,33 @@ export default function ReservaScreen({ navigation, route }: Props) {
         </>
       )}
     </ScreenContainer>
+
+      {floatingVisible && floatingMessage && (
+        <SafiFloatingCard
+          message={floatingMessage}
+          actionLabel={advice && altSlot ? `Canviar a ${altSlot.start}` : undefined}
+          actionDisabled={submitting}
+          onAction={
+            advice && altSlot
+              ? () => {
+                  sendRecommendationAction(advice, 'accepted');
+                  setSlot(altSlot);
+                  setAdvice(null);
+                  setAdviceNoData(null);
+                  setAdviceFailed(false);
+                }
+              : undefined
+          }
+          onDismiss={() => setDismissedKey(cardKey)}
+          onHeightChange={setFloatingH}
+        />
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  root: { flex: 1 },
   step: { ...typography.heading, marginTop: spacing.xl, marginBottom: spacing.sm },
   muted: { ...typography.caption, marginVertical: spacing.sm },
   error: { color: colors.danger, fontWeight: '600' },
@@ -572,15 +557,6 @@ const styles = StyleSheet.create({
   zoneTitleForecast: { color: colors.safi },
   zoneText: { ...typography.caption, marginTop: 2 },
   gridCard: { padding: spacing.md },
-  safiBox: {
-    padding: spacing.lg,
-    borderRadius: radius.lg,
-    backgroundColor: colors.safiSoft,
-    borderWidth: 1,
-    borderColor: colors.safi,
-  },
-  dismiss: { position: 'absolute', top: 0, right: 0, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', zIndex: 1 },
-  dismissText: { fontSize: 18, color: colors.safi },
   selectionBox: {
     marginTop: spacing.lg,
     padding: spacing.md,
@@ -605,8 +581,5 @@ const styles = StyleSheet.create({
   infoTitleForecast: { color: colors.safi, fontWeight: '700' },
   infoMain: { fontSize: 15, fontWeight: '700', color: colors.text },
   infoSub: { fontSize: 14, color: colors.textMuted, marginTop: 2 },
-  safiTitle: { fontWeight: '800', color: colors.safi, marginBottom: spacing.xs },
-  safiText: { fontSize: 16, color: colors.text, paddingRight: spacing.xl },
-  altButton: { marginTop: spacing.md },
   confirm: { minHeight: 56 },
 });
